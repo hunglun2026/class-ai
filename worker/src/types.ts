@@ -1,0 +1,39 @@
+export interface Env {
+  DB: D1Database;
+  SESSIONS: KVNamespace;
+  ATTACHMENTS: R2Bucket;
+  ENVIRONMENT: string;
+  GOOGLE_REDIRECT_URI: string;
+  APP_URL: string;
+  // secrets（wrangler secret put）
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
+  GEMINI_API_KEY: string;
+  SESSION_SECRET: string; // 簽 cookie 用
+}
+
+export interface Variables {
+  teacherId: string;
+}
+
+export interface Rubric {
+  id: string;
+  courseworkId: string;
+  mode: "freetext" | "rubric" | "answer_key";
+  instructions?: string | null;
+  rubricJson?: RubricItem[] | null;
+  answerKey?: string | null;
+  maxPoints: number;
+}
+
+export interface RubricItem {
+  item: string;
+  maxPoints: number;
+  description?: string;
+}
+
+export interface AiGradeResult {
+  score: number;
+  feedback: string;
+  itemScores?: { item: string; score: number; comment: string }[];
+}

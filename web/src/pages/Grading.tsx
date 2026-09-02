@@ -1,0 +1,300 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import { api } from "../api";
+
+type Mode = "freetext" | "rubric" | "answer_key";
+
+interface RubricItem {
+  item: string;
+  maxPoints: number;
+  description?: string;
+}
+
+interface Submission {
+  id: string;
+  student_id: string;
+  student_name: string;
+  state: string;
+  content_text: string;
+  ai_score: number | null;
+  ai_feedback: string | null;
+  final_score: number | null;
+  final_feedback: string | null;
+  status: "ai_suggested" | "teacher_edited" | "confirmed" | null;
+  ai_model: string | null;
+}
+
+export default function Grading() {
+  const { courseId, courseWorkId } = useParams();
+  const [rubric, setRubric] = useState<any>(null);
+  const [submissions, setSubmissions] = useState<Submission[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!courseWorkId) return;
+    api.getRubric(courseWorkId).then((r) => setRubric(r.rubric));
+    // 先讀 D1 快取（不打 Classroom API），有上次同步過的資料就先顯示，不用每次進頁面都重拉
+    api.listSubmissions(courseWorkId).then((r) => {
+      if (r.submissions.length) setSubmissions(r.submissions);
+    });
+  }, [courseWorkId]);
+
+  // 輕量刷新：只讀 D1 快取，評分/改分後更新畫面用這支
+  async function refreshSubmissions() {
+    if (!courseWorkId) return;
+    const r = await api.listSubmissions(courseWorkId);
+    setSubmissions(r.submissions);
+  }
+
+  // 重量同步：真的去打 Classroom API 拉最新繳交＋全班名冊，老師按「拉取最新繳交」才呼叫
+  async function syncSubmissions() {
+    if (!courseId || !courseWorkId) return;
+    setBusy("pulling");
+    setError("");
+    try {
+      const r = await api.syncSubmissions(courseId, courseWorkId);
+      setSubmissions(r.submissions);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function aiGradeOne(submissionId: string) {
+    setBusy(submissionId);
+    setError("");
+    try {
+      await api.aiGrade(submissionId);
+      await refreshSubmissions();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function aiGradeAll() {
+    if (!submissions) return;
+    for (const s of submissions) {
+      await aiGradeOne(s.id);
+    }
+  }
+
+  return (
+    <div>
+      <h2>評分標準</h2>
+      {!rubric ? (
+        <RubricEditor courseWorkId={courseWorkId!} onSaved={setRubric} />
+      ) : (
+        <RubricSummary rubric={rubric} onEdit={() => setRubric(null)} />
+      )}
+
+      <h2 style={{ marginTop: 24 }}>學生繳交</h2>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <button onClick={syncSubmissions} disabled={busy === "pulling"}>
+          {busy === "pulling" ? "拉取中…" : "拉取最新繳交"}
+        </button>
+        {submissions && rubric && (
+          <button className="secondary" onClick={aiGradeAll} disabled={!!busy}>
+            全部 AI 評分
+          </button>
+        )}
+      </div>
+      {error && <p style={{ color: "crimson" }}>{error}</p>}
+
+      {submissions?.length === 0 && <p>目前還沒有學生繳交這份作業。</p>}
+      {submissions?.map((s) => (
+        <SubmissionCard
+          key={s.id}
+          submission={s}
+          rubricReady={!!rubric}
+          busy={busy === s.id}
+          onAiGrade={() => aiGradeOne(s.id)}
+          onSaved={refreshSubmissions}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RubricEditor({ courseWorkId, onSaved }: { courseWorkId: string; onSaved: (r: any) => void }) {
+  const [mode, setMode] = useState<Mode>("freetext");
+  const [instructions, setInstructions] = useState("");
+  const [answerKey, setAnswerKey] = useState("");
+  const [maxPoints, setMaxPoints] = useState(100);
+  const [items, setItems] = useState<RubricItem[]>([{ item: "", maxPoints: 0 }]);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const body: any = { courseWorkId, mode, maxPoints };
+      if (mode === "freetext") body.instructions = instructions;
+      if (mode === "answer_key") body.answerKey = answerKey;
+      if (mode === "rubric") body.rubricItems = items.filter((it) => it.item.trim());
+      await api.saveRubric(body);
+      onSaved({ mode, instructions, answerKey, maxPoints, rubricJson: items });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="row" style={{ marginBottom: 8 }}>
+        <label>模式：</label>
+        <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+          <option value="freetext">自由文字指令</option>
+          <option value="rubric">評分量表（逐項給分）</option>
+          <option value="answer_key">標準答案比對</option>
+        </select>
+        <label>總分：</label>
+        <input type="number" value={maxPoints} onChange={(e) => setMaxPoints(Number(e.target.value))} style={{ width: 80 }} />
+      </div>
+
+      {mode === "freetext" && (
+        <textarea
+          rows={4}
+          placeholder="例如：檢查文法、邏輯是否通順、字數是否達到規定，並給出具體改進建議"
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+        />
+      )}
+
+      {mode === "answer_key" && (
+        <textarea rows={4} placeholder="標準答案內容" value={answerKey} onChange={(e) => setAnswerKey(e.target.value)} />
+      )}
+
+      {mode === "rubric" && (
+        <div>
+          {items.map((it, i) => (
+            <div className="row" key={i} style={{ marginBottom: 6 }}>
+              <input
+                type="text"
+                placeholder="評分項目（如：論點清晰度）"
+                value={it.item}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[i] = { ...next[i], item: e.target.value };
+                  setItems(next);
+                }}
+              />
+              <input
+                type="number"
+                placeholder="配分"
+                value={it.maxPoints}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[i] = { ...next[i], maxPoints: Number(e.target.value) };
+                  setItems(next);
+                }}
+                style={{ width: 80 }}
+              />
+            </div>
+          ))}
+          <button className="secondary" onClick={() => setItems([...items, { item: "", maxPoints: 0 }])}>
+            + 新增項目
+          </button>
+        </div>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        <button onClick={save} disabled={saving}>
+          {saving ? "儲存中…" : "儲存評分標準"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RubricSummary({ rubric, onEdit }: { rubric: any; onEdit: () => void }) {
+  const label = { freetext: "自由文字指令", rubric: "評分量表", answer_key: "標準答案比對" }[rubric.mode as Mode];
+  return (
+    <div className="card row" style={{ justifyContent: "space-between" }}>
+      <div>
+        <strong>{label}</strong>（總分 {rubric.maxPoints ?? rubric.max_points}）
+      </div>
+      <button className="secondary" onClick={onEdit}>
+        重新設定
+      </button>
+    </div>
+  );
+}
+
+function SubmissionCard({
+  submission,
+  rubricReady,
+  busy,
+  onAiGrade,
+  onSaved,
+}: {
+  submission: Submission;
+  rubricReady: boolean;
+  busy: boolean;
+  onAiGrade: () => void;
+  onSaved: () => void;
+}) {
+  const [score, setScore] = useState(submission.final_score ?? submission.ai_score ?? 0);
+  const [feedback, setFeedback] = useState(submission.final_feedback ?? submission.ai_feedback ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setScore(submission.final_score ?? submission.ai_score ?? 0);
+    setFeedback(submission.final_feedback ?? submission.ai_feedback ?? "");
+  }, [submission.final_score, submission.ai_score, submission.final_feedback, submission.ai_feedback]);
+
+  async function save(confirm: boolean) {
+    setSaving(true);
+    try {
+      await api.updateGrade(submission.id, { finalScore: score, finalFeedback: feedback, confirm });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const statusLabels: Record<string, string> = { ai_suggested: "AI 建議", teacher_edited: "老師已調整", confirmed: "已確認" };
+  const statusLabel = statusLabels[submission.status ?? ""] ?? "尚未評分";
+  const statusClass = submission.status === "confirmed" ? "confirmed" : submission.status === "teacher_edited" ? "edited" : "";
+
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <strong>{submission.student_name}</strong>
+        <span className={`badge ${statusClass}`}>{statusLabel}</span>
+      </div>
+
+      {submission.content_text && (
+        <p style={{ color: "#555", whiteSpace: "pre-wrap" }}>{submission.content_text}</p>
+      )}
+
+      {submission.status ? (
+        <div style={{ marginTop: 8 }}>
+          <div className="row">
+            <label>分數：</label>
+            <input type="number" value={score} onChange={(e) => setScore(Number(e.target.value))} style={{ width: 100 }} />
+          </div>
+          <textarea rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} style={{ marginTop: 6 }} />
+          {submission.ai_model && <div style={{ fontSize: 12, color: "#888" }}>AI 模型：{submission.ai_model}</div>}
+          <div className="row" style={{ marginTop: 8 }}>
+            <button onClick={() => save(false)} disabled={saving} className="secondary">
+              儲存修改
+            </button>
+            <button onClick={() => save(true)} disabled={saving}>
+              確認定案
+            </button>
+            <button className="secondary" onClick={onAiGrade} disabled={busy}>
+              {busy ? "評分中…" : "重新 AI 評分"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={onAiGrade} disabled={!rubricReady || busy} style={{ marginTop: 8 }}>
+          {busy ? "評分中…" : rubricReady ? "AI 評分" : "請先設定評分標準"}
+        </button>
+      )}
+    </div>
+  );
+}
