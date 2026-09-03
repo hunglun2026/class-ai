@@ -20,15 +20,13 @@
       "id": "207691989ce24cf09a577e1359718fcd"
     }
   ],
-  "r2_buckets": [
-    {
-      "binding": "ATTACHMENTS",
-      "bucket_name": "class-ai-attachments"
-    }
-  ],
+  // R2 目前程式沒用到（附件是下載→轉 base64→餵給 Gemini 就丟）。
+  // 真的要存附件時再補：token 加 Workers R2 Storage:Edit、建 bucket、加回這段。
+  // 這裡是「正式環境」的值（wrangler deploy 會用）。
+  // 本機開發時 worker/.dev.vars 會覆蓋掉這三個 key，改回 localhost。
   "vars": {
-    "ENVIRONMENT": "development",
-    "GOOGLE_REDIRECT_URI": "http://localhost:8787/api/auth/google/callback",
-    "APP_URL": "http://localhost:5173"
+    "ENVIRONMENT": "production",
+    "GOOGLE_REDIRECT_URI": "https://class-ai-worker.hunglun2026.workers.dev/api/auth/google/callback",
+    "APP_URL": "https://class-ai.pages.dev"
   }
 }

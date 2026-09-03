@@ -1,8 +1,9 @@
 import type { AiGradeResult, Rubric } from "../types";
 import type { ExtractedAttachment } from "./drive";
 
-// 雙模型容錯，跟 learnengine 的 gen-questions.mjs 同一套寫法：前者失敗就退到後者
-const MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+// 雙模型容錯：前者失敗就退到後者。用 `-latest` 別名（跟 school/el 正式環境同寫法），
+// Google 換版時不會因為寫死版號而整支壞掉。多模態（圖片/PDF）吃重時退到 pro。
+const MODELS = ["gemini-flash-latest", "gemini-pro-latest"];
 
 function buildRubricInstruction(rubric: Rubric): string {
   if (rubric.mode === "freetext") {
@@ -44,7 +45,7 @@ interface GeminiPart {
   inline_data?: { mime_type: string; data: string };
 }
 
-async function callGemini(apiKey: string, model: string, prompt: string, attachments: ExtractedAttachment[]): Promise<AiGradeResult> {
+async function callGemini(apiKey: string, model: string, prompt: string, attachments: ExtractedAttachment[], maxPoints: number): Promise<AiGradeResult> {
   const parts: GeminiPart[] = [{ text: prompt }];
   for (const att of attachments) {
     if (att.kind === "text" && att.text) {
@@ -71,7 +72,11 @@ async function callGemini(apiKey: string, model: string, prompt: string, attachm
   const data = await res.json<any>();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error(`${model} 沒有回傳內容（可能被安全過濾擋下或額度用盡）`);
-  return JSON.parse(text);
+  const parsed = JSON.parse(text) as AiGradeResult;
+  // 模型偶爾會把分數寫成字串、或給超出上限的值——夾回 0～maxPoints，老師看到的建議值才不會怪
+  const raw = Number(parsed.score);
+  parsed.score = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxPoints) : 0;
+  return parsed;
 }
 
 export async function gradeSubmission(
@@ -84,7 +89,7 @@ export async function gradeSubmission(
   let lastError: Error | null = null;
   for (const model of MODELS) {
     try {
-      const result = await callGemini(apiKey, model, prompt, attachments);
+      const result = await callGemini(apiKey, model, prompt, attachments, rubric.maxPoints);
       return { result, model };
     } catch (e) {
       lastError = e as Error;
