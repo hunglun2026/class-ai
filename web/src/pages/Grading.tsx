@@ -112,6 +112,10 @@ export default function Grading() {
         <h2 className="section-title">
           <span className="section-index">2</span>學生繳交
         </h2>
+        <p className="section-hint">
+          按「AI 評分」後結果會直接顯示在下面每位學生自己的卡片裡，不會跳到別的頁面，也不會自動送出，
+          你看過覺得可以了，再按「確認定案」。
+        </p>
         <div className="row" style={{ marginBottom: 16 }}>
           <button onClick={syncSubmissions} disabled={busy === "pulling"}>
             {busy === "pulling" ? "拉取中…" : "拉取最新繳交"}
@@ -315,25 +319,31 @@ function SubmissionCard({
   const statusClass = submission.status === "confirmed" ? "confirmed" : submission.status === "teacher_edited" ? "edited" : "";
 
   return (
-    <div className="card">
+    <div className={`card submission-card ${submission.status === "ai_suggested" ? "needs-review" : ""}`}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <strong>{submission.student_name}</strong>
         <span className={`badge ${statusClass}`}>{statusLabel}</span>
       </div>
 
       {submission.content_text && (
-        <p style={{ color: "#555", whiteSpace: "pre-wrap" }}>{submission.content_text}</p>
+        <p className="submission-text">{submission.content_text}</p>
       )}
 
       {submission.status ? (
-        <div style={{ marginTop: 8 }}>
-          <div className="row">
-            <label>分數：</label>
+        <div className="result-box">
+          {submission.status === "ai_suggested" && (
+            <div className="result-box-hint">AI 評分結果如下，看過覺得沒問題再按「確認定案」</div>
+          )}
+          <div className="row field-row">
+            <label className="field-label">分數</label>
             <input type="number" value={score} onChange={(e) => setScore(Number(e.target.value))} style={{ width: 100 }} />
           </div>
-          <textarea rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} style={{ marginTop: 6 }} />
-          {submission.ai_model && <div style={{ fontSize: 12, color: "#888" }}>AI 模型：{submission.ai_model}</div>}
-          <div className="row" style={{ marginTop: 8 }}>
+          <label className="field-label" style={{ display: "block", marginBottom: 4 }}>
+            評語
+          </label>
+          <textarea rows={3} value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+          {submission.ai_model && <div className="ai-model-tag">AI 模型：{submission.ai_model}</div>}
+          <div className="row" style={{ marginTop: 10 }}>
             <button onClick={() => save(false)} disabled={saving} className="secondary">
               儲存修改
             </button>

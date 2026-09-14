@@ -27,11 +27,11 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <Link to="/" style={{ textDecoration: "none", color: "#111", fontWeight: 600 }}>
-          classAI
+        <Link to="/" className="brand-link">
+          <span className="brand-name">classAI</span>
         </Link>
         <div className="row">
-          <span>{teacher.name}</span>
+          <span className="teacher-name">{teacher.name}</span>
           <button
             className="secondary"
             onClick={async () => {
@@ -43,6 +43,10 @@ export default function App() {
           </button>
         </div>
       </header>
+      <a className="powered-by" href="https://www.hunglun.com/" target="_blank" rel="noreferrer">
+        <img src="/hunglun-logo.png" alt="鴻綸科技" />
+        <span>由鴻綸科技提供</span>
+      </a>
       <div className="container">
         <Routes>
           <Route path="/" element={<Courses />} />
