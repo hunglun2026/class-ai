@@ -28,7 +28,7 @@ export default function App() {
     <>
       <header className="app-header">
         <Link to="/" style={{ textDecoration: "none", color: "#111", fontWeight: 600 }}>
-          作業 AI 評分
+          classAI
         </Link>
         <div className="row">
           <span>{teacher.name}</span>
