@@ -77,7 +77,7 @@ authRoutes.get("/google/callback", async (c) => {
 authRoutes.post("/logout", async (c) => {
   const sessionId = readCookie(c.req.header("Cookie") ?? null, "session");
   if (sessionId) await destroySession(c.env, sessionId);
-  c.header("Set-Cookie", clearCookieHeader());
+  c.header("Set-Cookie", clearCookieHeader(c.env));
   return c.json({ ok: true });
 });
 

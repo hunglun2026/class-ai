@@ -27,13 +27,21 @@ export function readCookie(cookieHeader: string | null, name: string): string | 
   return undefined;
 }
 
-export function sessionCookieHeader(env: Env, sessionId: string): string {
-  const secure = env.ENVIRONMENT === "production" ? "; Secure" : "";
-  return `session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
+// 前端（class-ai.pages.dev）跟後端 API（class-ai-worker.hunglun2026.workers.dev）是不同網域，
+// 前端用 fetch 帶這個 cookie 屬於跨網域請求，SameSite=Lax 會被瀏覽器擋掉不送出，
+// 導致登入完成後前端讀不到已登入狀態、被導回登入頁循環。正式環境要用 SameSite=None
+// （瀏覽器規定 SameSite=None 一定要搭配 Secure，本機 http 開發環境沒有 https 用不了，維持 Lax 即可，
+// 反正本機前後端都是 localhost，屬於同一個 site，Lax 不會擋）。
+function sessionCookieAttrs(env: Env): string {
+  return env.ENVIRONMENT === "production" ? "SameSite=None; Secure" : "SameSite=Lax";
 }
 
-export function clearCookieHeader(): string {
-  return `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function sessionCookieHeader(env: Env, sessionId: string): string {
+  return `session=${sessionId}; Path=/; HttpOnly; ${sessionCookieAttrs(env)}; Max-Age=${SESSION_TTL_SECONDS}`;
+}
+
+export function clearCookieHeader(env: Env): string {
+  return `session=; Path=/; HttpOnly; ${sessionCookieAttrs(env)}; Max-Age=0`;
 }
 
 // OAuth state 防 CSRF：登入導去 Google 前先把 state 存一份短效 cookie，
