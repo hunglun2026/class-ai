@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api";
+import Stepper from "../components/Stepper";
 
 const DEFAULT_INSTRUCTIONS =
   "請評估這份作業是否切題、論述是否清楚、有沒有明顯錯字或邏輯問題，並在評語中給出具體的改進建議。";
@@ -30,7 +31,8 @@ interface Submission {
 export default function Grading() {
   const { courseId, courseWorkId } = useParams();
   const location = useLocation();
-  const assignment = (location.state as { title?: string; maxPoints?: number } | null) ?? null;
+  const assignment =
+    (location.state as { title?: string; maxPoints?: number; courseName?: string } | null) ?? null;
   const [rubric, setRubric] = useState<any>(null);
   const [submissions, setSubmissions] = useState<Submission[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -89,6 +91,10 @@ export default function Grading() {
 
   return (
     <div>
+      <Stepper current={2} />
+      <Link to={`/courses/${courseId}`} state={{ courseName: assignment?.courseName }} className="back-link">
+        ← 回作業列表{assignment?.courseName ? `（${assignment.courseName}）` : ""}
+      </Link>
       {assignment?.title && (
         <div className="assignment-banner">
           <div className="assignment-eyebrow">正在評分</div>

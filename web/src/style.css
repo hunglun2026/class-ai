@@ -52,6 +52,73 @@ body {
 .login-title { font-size: 40px; font-weight: 800; color: var(--brand); margin-bottom: 6px; letter-spacing: -0.03em; }
 .login-subtitle { color: var(--ink-soft); margin-bottom: 24px; line-height: 1.6; }
 
+/* 頂部步驟指示條：讓老師隨時知道自己在流程的哪一步 */
+.stepper { display: flex; align-items: center; margin-bottom: 20px; }
+.stepper-item { display: flex; align-items: center; }
+.stepper-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e2e5ee;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stepper-item.active .stepper-dot { background: var(--brand); color: #fff; }
+.stepper-item.done .stepper-dot { background: #dcfce7; color: #166534; }
+.stepper-label {
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.stepper-item.active .stepper-label { color: var(--ink); font-weight: 700; }
+.stepper-line { width: 24px; height: 1.5px; background: var(--line); margin: 0 10px; }
+@media (max-width: 480px) {
+  .stepper-label { display: none; }
+  .stepper-item.active .stepper-label { display: inline; }
+  .stepper-line { width: 14px; margin: 0 4px; }
+}
+
+.back-link {
+  display: inline-block;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.back-link:hover { color: var(--brand); }
+
+/* 首次使用說明卡片 */
+.intro-card {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  position: relative;
+}
+.intro-card h3 { margin: 0 0 10px; font-size: 16px; }
+.intro-steps { margin: 0 0 10px; padding-left: 20px; }
+.intro-steps li { margin-bottom: 4px; line-height: 1.5; }
+.intro-note { margin: 0; font-size: 13px; color: var(--ink-soft); }
+.intro-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: transparent;
+  color: var(--ink-soft);
+  border: none;
+  padding: 4px 8px;
+  min-height: auto;
+  font-size: 14px;
+}
+.intro-close:hover { background: rgba(0, 0, 0, 0.05); color: var(--ink); }
+
 .container { max-width: 960px; margin: 0 auto; padding: 20px; }
 @media (max-width: 480px) {
   .container { padding: 14px; }
