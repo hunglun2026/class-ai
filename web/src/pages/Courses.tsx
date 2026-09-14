@@ -28,7 +28,7 @@ export default function Courses() {
     <div>
       <h2>選一門課程</h2>
       {courses.map((c) => (
-        <div key={c.id} className="card" onClick={() => navigate(`/courses/${c.id}`)}>
+        <div key={c.id} className="card clickable" onClick={() => navigate(`/courses/${c.id}`)}>
           <strong>{c.name}</strong>
           {c.section && <div style={{ color: "#666" }}>{c.section}</div>}
         </div>

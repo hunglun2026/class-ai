@@ -66,6 +66,10 @@ export async function refreshAccessToken(env: Env, refreshToken: string): Promis
 
 export function decodeIdToken(idToken: string): { sub: string; email: string; name: string; picture?: string } {
   const payload = idToken.split(".")[1];
-  const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+  const binary = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+  // atob 只會逐位元組轉成字元，中文這類多位元組 UTF-8 字元（例如 Google 帳號顯示名稱）
+  // 直接 JSON.parse 會變亂碼，要先用 TextDecoder 把位元組正確組回 UTF-8 字串再解析
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  const json = new TextDecoder("utf-8").decode(bytes);
   return JSON.parse(json);
 }

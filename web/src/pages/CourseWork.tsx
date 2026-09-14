@@ -30,7 +30,15 @@ export default function CourseWork() {
     <div>
       <h2>選一份作業</h2>
       {list.map((w) => (
-        <div key={w.id} className="card" onClick={() => navigate(`/courses/${courseId}/coursework/${w.id}`)}>
+        <div
+          key={w.id}
+          className="card clickable"
+          onClick={() =>
+            navigate(`/courses/${courseId}/coursework/${w.id}`, {
+              state: { title: w.title, maxPoints: w.maxPoints },
+            })
+          }
+        >
           <strong>{w.title}</strong>
           {w.maxPoints != null && <div style={{ color: "#666" }}>滿分 {w.maxPoints}</div>}
         </div>

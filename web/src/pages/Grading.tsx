@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { api } from "../api";
+
+const DEFAULT_INSTRUCTIONS =
+  "請評估這份作業是否切題、論述是否清楚、有沒有明顯錯字或邏輯問題，並在評語中給出具體的改進建議。";
 
 type Mode = "freetext" | "rubric" | "answer_key";
 
@@ -26,6 +29,8 @@ interface Submission {
 
 export default function Grading() {
   const { courseId, courseWorkId } = useParams();
+  const location = useLocation();
+  const assignment = (location.state as { title?: string; maxPoints?: number } | null) ?? null;
   const [rubric, setRubric] = useState<any>(null);
   const [submissions, setSubmissions] = useState<Submission[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,46 +89,80 @@ export default function Grading() {
 
   return (
     <div>
-      <h2>評分標準</h2>
-      {!rubric ? (
-        <RubricEditor courseWorkId={courseWorkId!} onSaved={setRubric} />
-      ) : (
-        <RubricSummary rubric={rubric} onEdit={() => setRubric(null)} />
+      {assignment?.title && (
+        <div className="assignment-banner">
+          <div className="assignment-eyebrow">正在評分</div>
+          <h1 className="assignment-title">{assignment.title}</h1>
+          {assignment.maxPoints != null && <div className="assignment-meta">滿分 {assignment.maxPoints} 分</div>}
+        </div>
       )}
 
-      <h2 style={{ marginTop: 24 }}>學生繳交</h2>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <button onClick={syncSubmissions} disabled={busy === "pulling"}>
-          {busy === "pulling" ? "拉取中…" : "拉取最新繳交"}
-        </button>
-        {submissions && rubric && (
-          <button className="secondary" onClick={aiGradeAll} disabled={!!busy}>
-            全部 AI 評分
-          </button>
+      <section className="section">
+        <h2 className="section-title">
+          <span className="section-index">1</span>評分標準
+        </h2>
+        {!rubric ? (
+          <RubricEditor courseWorkId={courseWorkId!} defaultMaxPoints={assignment?.maxPoints} onSaved={setRubric} />
+        ) : (
+          <RubricSummary rubric={rubric} onEdit={() => setRubric(null)} />
         )}
-      </div>
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      </section>
 
-      {submissions?.length === 0 && <p>目前還沒有學生繳交這份作業。</p>}
-      {submissions?.map((s) => (
-        <SubmissionCard
-          key={s.id}
-          submission={s}
-          rubricReady={!!rubric}
-          busy={busy === s.id}
-          onAiGrade={() => aiGradeOne(s.id)}
-          onSaved={refreshSubmissions}
-        />
-      ))}
+      <section className="section">
+        <h2 className="section-title">
+          <span className="section-index">2</span>學生繳交
+        </h2>
+        <div className="row" style={{ marginBottom: 16 }}>
+          <button onClick={syncSubmissions} disabled={busy === "pulling"}>
+            {busy === "pulling" ? "拉取中…" : "拉取最新繳交"}
+          </button>
+          {submissions && rubric && submissions.length > 0 && (
+            <button className="secondary" onClick={aiGradeAll} disabled={!!busy}>
+              全部 AI 評分
+            </button>
+          )}
+        </div>
+        {error && <p className="error-text">{error}</p>}
+
+        {submissions?.length === 0 && (
+          <p className="empty-hint">目前還沒有學生繳交這份作業，繳交後按上面「拉取最新繳交」就會出現在這裡。</p>
+        )}
+        {submissions?.map((s) => (
+          <SubmissionCard
+            key={s.id}
+            submission={s}
+            rubricReady={!!rubric}
+            busy={busy === s.id}
+            onAiGrade={() => aiGradeOne(s.id)}
+            onSaved={refreshSubmissions}
+          />
+        ))}
+      </section>
     </div>
   );
 }
 
-function RubricEditor({ courseWorkId, onSaved }: { courseWorkId: string; onSaved: (r: any) => void }) {
+const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
+  { value: "freetext", label: "自由文字指令", hint: "最快、最有彈性，適合大多數作業" },
+  { value: "rubric", label: "評分量表", hint: "想逐項給分時用" },
+  { value: "answer_key", label: "標準答案比對", hint: "有明確正確答案的題目" },
+];
+
+function RubricEditor({
+  courseWorkId,
+  defaultMaxPoints,
+  onSaved,
+}: {
+  courseWorkId: string;
+  defaultMaxPoints?: number;
+  onSaved: (r: any) => void;
+}) {
   const [mode, setMode] = useState<Mode>("freetext");
-  const [instructions, setInstructions] = useState("");
+  // 預設帶一段常用的評語指令，老師照抄或微調即可，不必從空白開始想
+  const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
   const [answerKey, setAnswerKey] = useState("");
-  const [maxPoints, setMaxPoints] = useState(100);
+  // 有從 Classroom 讀到這份作業的滿分就直接帶入，沒有才退回 100
+  const [maxPoints, setMaxPoints] = useState(defaultMaxPoints ?? 100);
   const [items, setItems] = useState<RubricItem[]>([{ item: "", maxPoints: 0 }]);
   const [saving, setSaving] = useState(false);
 
@@ -143,15 +182,31 @@ function RubricEditor({ courseWorkId, onSaved }: { courseWorkId: string; onSaved
 
   return (
     <div className="card">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <label>模式：</label>
-        <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-          <option value="freetext">自由文字指令</option>
-          <option value="rubric">評分量表（逐項給分）</option>
-          <option value="answer_key">標準答案比對</option>
-        </select>
-        <label>總分：</label>
-        <input type="number" value={maxPoints} onChange={(e) => setMaxPoints(Number(e.target.value))} style={{ width: 80 }} />
+      <div className="mode-picker">
+        {MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`mode-option ${mode === opt.value ? "active" : ""}`}
+            onClick={() => setMode(opt.value)}
+          >
+            <div className="mode-option-label">{opt.label}</div>
+            <div className="mode-option-hint">{opt.hint}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="row field-row">
+        <label className="field-label" htmlFor="maxPoints">
+          總分
+        </label>
+        <input
+          id="maxPoints"
+          type="number"
+          value={maxPoints}
+          onChange={(e) => setMaxPoints(Number(e.target.value))}
+          style={{ width: 100 }}
+        />
       </div>
 
       {mode === "freetext" && (
