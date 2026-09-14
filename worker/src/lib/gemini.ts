@@ -1,9 +1,12 @@
 import type { AiGradeResult, Rubric } from "../types";
 import type { ExtractedAttachment } from "./drive";
 
-// 雙模型容錯：前者失敗就退到後者。用 `-latest` 別名（跟 school/el 正式環境同寫法），
-// Google 換版時不會因為寫死版號而整支壞掉。多模態（圖片/PDF）吃重時退到 pro。
-const MODELS = ["gemini-flash-latest", "gemini-pro-latest"];
+// 三層容錯：依序試到成功為止。用 `-latest` 別名（跟 school/el 正式環境同寫法），
+// Google 換版時不會因為寫死版號而整支壞掉。
+// 2026-09-14 實測：這把 API key 的 pro 額度（免費層）很容易打光（429），
+// flash 偶爾短暫過載（503），flash-lite 最穩定又能正確輸出JSON，改成優先用它，
+// pro 留最後一層，額度恢復時還是能用到更強的模型。
+const MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"];
 
 function buildRubricInstruction(rubric: Rubric): string {
   if (rubric.mode === "freetext") {
