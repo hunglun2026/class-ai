@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Env, Variables } from "../types";
 import { requireAuth } from "../middleware";
 import { ownsCourseWork } from "../lib/ownership";
+import { extractExcelText } from "../lib/excel";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
@@ -15,7 +16,11 @@ const rubricItemSchema = z.object({
 
 // 8MB 原始檔案上限（base64 字串長度約是原始位元組的 4/3 倍），擋過大檔案塞爆 D1 那一列
 const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
-const ALLOWED_ANSWER_KEY_FILE_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const EXCEL_MIME_TYPES = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+  "application/vnd.ms-excel", // .xls
+];
+const ALLOWED_ANSWER_KEY_FILE_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf", ...EXCEL_MIME_TYPES];
 
 const answerKeyFileSchema = z.object({
   name: z.string(),
@@ -42,7 +47,8 @@ rubricRoutes.get("/:courseWorkId", async (c) => {
   if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
     return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
   }
-  // 故意不選 answer_key_file_base64：只是要顯示「已上傳 xxx.pdf」，沒必要把整包檔案內容送回前端
+  // 故意不選 answer_key_file_base64/answer_key_file_extracted_text：只是要顯示「已上傳 xxx.pdf」，
+  // 沒必要把整包檔案內容送回前端
   const row = await c.env.DB.prepare(
     `SELECT id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, max_points, created_at, updated_at
      FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1`
@@ -72,6 +78,7 @@ rubricRoutes.post("/", async (c) => {
   let fileName: string | null = null;
   let fileMime: string | null = null;
   let fileBase64: string | null = null;
+  let fileExtractedText: string | null = null;
 
   if (body.answerKeyFile) {
     // base64 字串長度 * 3/4 還原成原始位元組數，粗估即可，用來擋過大檔案
@@ -80,25 +87,42 @@ rubricRoutes.post("/", async (c) => {
     }
     fileName = body.answerKeyFile.name;
     fileMime = body.answerKeyFile.mimeType;
-    fileBase64 = body.answerKeyFile.base64;
+
+    if (EXCEL_MIME_TYPES.includes(fileMime)) {
+      // Excel 不是圖片/PDF，AI 讀不懂二進位格式，先在這裡解析成文字表格存起來，
+      // 原始檔案就不用留（評分時只會用到解析後的文字）
+      try {
+        fileExtractedText = extractExcelText(body.answerKeyFile.base64);
+      } catch (e) {
+        return c.json({ error: `Excel 檔案解析失敗，請確認檔案沒有損壞：${(e as Error).message}` }, 400);
+      }
+    } else {
+      fileBase64 = body.answerKeyFile.base64;
+    }
   } else if (body.keepAnswerKeyFile) {
     // 這次沒換檔案，把上一版存的檔案原樣帶到新的一列（取代式儲存，每次存都是新的一列）
     const prev = await c.env.DB.prepare(
-      "SELECT answer_key_file_name, answer_key_file_mime, answer_key_file_base64 FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1"
+      "SELECT answer_key_file_name, answer_key_file_mime, answer_key_file_base64, answer_key_file_extracted_text FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1"
     )
       .bind(body.courseWorkId)
-      .first<{ answer_key_file_name: string | null; answer_key_file_mime: string | null; answer_key_file_base64: string | null }>();
+      .first<{
+        answer_key_file_name: string | null;
+        answer_key_file_mime: string | null;
+        answer_key_file_base64: string | null;
+        answer_key_file_extracted_text: string | null;
+      }>();
     fileName = prev?.answer_key_file_name ?? null;
     fileMime = prev?.answer_key_file_mime ?? null;
     fileBase64 = prev?.answer_key_file_base64 ?? null;
+    fileExtractedText = prev?.answer_key_file_extracted_text ?? null;
   }
 
   const now = Math.floor(Date.now() / 1000);
   const id = crypto.randomUUID();
 
   await c.env.DB.prepare(
-    `INSERT INTO rubrics (id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, answer_key_file_base64, max_points, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO rubrics (id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, answer_key_file_base64, answer_key_file_extracted_text, max_points, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
@@ -110,6 +134,7 @@ rubricRoutes.post("/", async (c) => {
       fileName,
       fileMime,
       fileBase64,
+      fileExtractedText,
       body.maxPoints,
       now,
       now

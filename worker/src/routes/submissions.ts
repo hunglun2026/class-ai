@@ -106,9 +106,15 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     instructions: rubricRow.instructions,
     rubricJson: rubricRow.rubric_json ? JSON.parse(rubricRow.rubric_json) : null,
     answerKey: rubricRow.answer_key,
-    answerKeyFile: rubricRow.answer_key_file_base64
-      ? { name: rubricRow.answer_key_file_name, mimeType: rubricRow.answer_key_file_mime, base64: rubricRow.answer_key_file_base64 }
-      : null,
+    answerKeyFile:
+      rubricRow.answer_key_file_base64 || rubricRow.answer_key_file_extracted_text
+        ? {
+            name: rubricRow.answer_key_file_name,
+            mimeType: rubricRow.answer_key_file_mime,
+            base64: rubricRow.answer_key_file_base64 ?? undefined,
+            extractedText: rubricRow.answer_key_file_extracted_text ?? undefined,
+          }
+        : null,
     maxPoints: rubricRow.max_points,
   };
 

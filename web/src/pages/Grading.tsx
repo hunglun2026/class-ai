@@ -164,11 +164,12 @@ export default function Grading() {
 const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "freetext", label: "自由文字指令", hint: "最快、最有彈性，適合大多數作業" },
   { value: "rubric", label: "評分量表", hint: "想逐項給分時用" },
-  { value: "answer_key", label: "標準答案比對", hint: "有明確正確答案的題目，可貼文字或上傳照片／PDF答案" },
+  { value: "answer_key", label: "上傳檔案評分", hint: "有明確正確答案的題目：可貼文字，或直接上傳照片／PDF／Excel答案" },
 ];
 
 const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
-const ANSWER_KEY_FILE_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
+const ANSWER_KEY_FILE_ACCEPT =
+  "image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.xlsx,.xls";
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -286,7 +287,7 @@ function RubricEditor({
           <textarea rows={4} placeholder="標準答案內容（可留空，改用下面上傳檔案）" value={answerKey} onChange={(e) => setAnswerKey(e.target.value)} />
           <div className="field-row" style={{ marginTop: 8 }}>
             <label className="field-label" htmlFor="answerKeyFile">
-              或上傳答案檔（圖片／PDF，8MB 內）
+              或上傳答案檔（圖片／PDF／Excel，8MB 內）
             </label>
             <input
               id="answerKeyFile"
@@ -356,7 +357,7 @@ function RubricEditor({
 }
 
 function RubricSummary({ rubric, onEdit }: { rubric: any; onEdit: () => void }) {
-  const label = { freetext: "自由文字指令", rubric: "評分量表", answer_key: "標準答案比對" }[rubric.mode as Mode];
+  const label = { freetext: "自由文字指令", rubric: "評分量表", answer_key: "上傳檔案評分" }[rubric.mode as Mode];
   return (
     <div className="card row" style={{ justifyContent: "space-between" }}>
       <div>

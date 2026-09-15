@@ -105,12 +105,14 @@ export async function gradeSubmission(
 ): Promise<{ result: AiGradeResult; model: string }> {
   const prompt = buildPrompt(rubric, studentText);
   const answerKeyAttachment: ExtractedAttachment | null = rubric.answerKeyFile
-    ? {
-        name: rubric.answerKeyFile.name,
-        kind: rubric.answerKeyFile.mimeType === "application/pdf" ? "pdf" : "image",
-        base64: rubric.answerKeyFile.base64,
-        mimeType: rubric.answerKeyFile.mimeType,
-      }
+    ? rubric.answerKeyFile.extractedText
+      ? { name: rubric.answerKeyFile.name, kind: "text", text: rubric.answerKeyFile.extractedText }
+      : {
+          name: rubric.answerKeyFile.name,
+          kind: rubric.answerKeyFile.mimeType === "application/pdf" ? "pdf" : "image",
+          base64: rubric.answerKeyFile.base64,
+          mimeType: rubric.answerKeyFile.mimeType,
+        }
     : null;
   let lastError: Error | null = null;
   for (const model of MODELS) {
