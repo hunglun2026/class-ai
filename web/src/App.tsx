@@ -28,6 +28,7 @@ export default function App() {
     <>
       <header className="app-header">
         <Link to="/" className="brand-link">
+          <img src="/hunglun-logo.png?v=2" alt="鴻綸科技" className="header-logo" />
           <span className="brand-name">classAI</span>
         </Link>
         <div className="row">
@@ -44,7 +45,7 @@ export default function App() {
         </div>
       </header>
       <a className="powered-by" href="https://www.hunglun.com/" target="_blank" rel="noreferrer">
-        <img src="/hunglun-logo.png" alt="鴻綸科技" />
+        <img src="/hunglun-logo.png?v=2" alt="鴻綸科技" />
         <span>由鴻綸科技提供</span>
       </a>
       <div className="container">
