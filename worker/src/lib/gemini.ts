@@ -74,18 +74,27 @@ async function callGemini(
   pushAttachmentParts(parts, attachments, "學生作答附件");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 2048,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
+  // 沒設 timeout 的話，一次卡住的請求會拖住整個三層容錯（等到 Cloudflare 自己的邊界逾時才放棄），
+  // 30 秒還沒回應就直接判失敗、換下一個模型
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json",
+        },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "TimeoutError") throw new Error(`${model} 30 秒內沒有回應`);
+    throw e;
+  }
   if (!res.ok) throw new Error(`${model} 回 ${res.status}：${(await res.text()).slice(0, 200)}`);
   const data = await res.json<any>();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;

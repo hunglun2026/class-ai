@@ -83,11 +83,44 @@ export default function Grading() {
     }
   }
 
-  async function aiGradeAll() {
-    if (!submissions) return;
-    for (const s of submissions) {
-      await aiGradeOne(s.id);
+  // 一個個排隊評分整班會很慢（30人就是等30次API），改成同時最多跑3個，
+  // 用Set記錄現在正在評分的學生id，畫面上每張卡片各自顯示自己在不在評分中
+  const [batchBusyIds, setBatchBusyIds] = useState<Set<string>>(new Set());
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+  const BATCH_CONCURRENCY = 3;
+
+  async function aiGradeAllBatched() {
+    if (!submissions?.length) return;
+    setError("");
+    const queue = [...submissions];
+    const total = queue.length;
+    let done = 0;
+    setBatchProgress({ done: 0, total });
+
+    async function worker() {
+      while (queue.length) {
+        const s = queue.shift();
+        if (!s) return;
+        setBatchBusyIds((prev) => new Set(prev).add(s.id));
+        try {
+          await api.aiGrade(s.id);
+          await refreshSubmissions(); // 每評完一個就刷新，畫面能一個一個跳出結果，不用等全班跑完
+        } catch (e) {
+          setError(`${s.student_name}：${(e as Error).message}`);
+        } finally {
+          setBatchBusyIds((prev) => {
+            const next = new Set(prev);
+            next.delete(s.id);
+            return next;
+          });
+          done += 1;
+          setBatchProgress({ done, total });
+        }
+      }
     }
+
+    await Promise.all(Array.from({ length: Math.min(BATCH_CONCURRENCY, queue.length) }, worker));
+    setBatchProgress(null);
   }
 
   return (
@@ -136,8 +169,8 @@ export default function Grading() {
             {busy === "pulling" ? "拉取中…" : "拉取最新繳交"}
           </button>
           {submissions && rubric && submissions.length > 0 && (
-            <button className="secondary" onClick={aiGradeAll} disabled={!!busy}>
-              全部 AI 評分
+            <button className="secondary" onClick={aiGradeAllBatched} disabled={!!busy || !!batchProgress}>
+              {batchProgress ? `評分中…（${batchProgress.done}/${batchProgress.total}）` : "全部 AI 評分"}
             </button>
           )}
         </div>
@@ -151,7 +184,7 @@ export default function Grading() {
             key={s.id}
             submission={s}
             rubricReady={!!rubric}
-            busy={busy === s.id}
+            busy={busy === s.id || batchBusyIds.has(s.id)}
             onAiGrade={() => aiGradeOne(s.id)}
             onSaved={refreshSubmissions}
           />
