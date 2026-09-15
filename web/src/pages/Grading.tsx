@@ -34,6 +34,7 @@ export default function Grading() {
   const assignment =
     (location.state as { title?: string; maxPoints?: number; courseName?: string } | null) ?? null;
   const [rubric, setRubric] = useState<any>(null);
+  const [editingRubric, setEditingRubric] = useState(false);
   const [submissions, setSubmissions] = useState<Submission[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -107,10 +108,18 @@ export default function Grading() {
         <h2 className="section-title">
           <span className="section-index">1</span>評分標準
         </h2>
-        {!rubric ? (
-          <RubricEditor courseWorkId={courseWorkId!} defaultMaxPoints={assignment?.maxPoints} onSaved={setRubric} />
+        {!rubric || editingRubric ? (
+          <RubricEditor
+            courseWorkId={courseWorkId!}
+            defaultMaxPoints={assignment?.maxPoints}
+            initial={rubric}
+            onSaved={(r) => {
+              setRubric(r);
+              setEditingRubric(false);
+            }}
+          />
         ) : (
-          <RubricSummary rubric={rubric} onEdit={() => setRubric(null)} />
+          <RubricSummary rubric={rubric} onEdit={() => setEditingRubric(true)} />
         )}
       </section>
 
@@ -158,33 +167,77 @@ const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "answer_key", label: "標準答案比對", hint: "有明確正確答案的題目" },
 ];
 
+const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
+const ANSWER_KEY_FILE_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 function RubricEditor({
   courseWorkId,
   defaultMaxPoints,
+  initial,
   onSaved,
 }: {
   courseWorkId: string;
   defaultMaxPoints?: number;
+  initial?: any;
   onSaved: (r: any) => void;
 }) {
-  const [mode, setMode] = useState<Mode>("freetext");
+  const [mode, setMode] = useState<Mode>(initial?.mode ?? "freetext");
   // 預設帶一段常用的評語指令，老師照抄或微調即可，不必從空白開始想
-  const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
-  const [answerKey, setAnswerKey] = useState("");
+  const [instructions, setInstructions] = useState(initial?.instructions ?? DEFAULT_INSTRUCTIONS);
+  const [answerKey, setAnswerKey] = useState(initial?.answerKey ?? "");
   // 有從 Classroom 讀到這份作業的滿分就直接帶入，沒有才退回 100
-  const [maxPoints, setMaxPoints] = useState(defaultMaxPoints ?? 100);
-  const [items, setItems] = useState<RubricItem[]>([{ item: "", maxPoints: 0 }]);
+  const [maxPoints, setMaxPoints] = useState(initial?.maxPoints ?? initial?.max_points ?? defaultMaxPoints ?? 100);
+  const [items, setItems] = useState<RubricItem[]>(
+    initial?.rubricJson?.length ? initial.rubricJson : [{ item: "", maxPoints: 0 }]
+  );
+  // 已存過的答案檔（只有名稱/類型，沒有內容）；選了新檔案才會換掉
+  const [existingFile, setExistingFile] = useState(initial?.answerKeyFile ?? null);
+  const [newFile, setNewFile] = useState<{ name: string; mimeType: string; base64: string } | null>(null);
+  const [fileRemoved, setFileRemoved] = useState(false);
+  const [fileError, setFileError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  async function handleFilePick(file: File | undefined) {
+    setFileError("");
+    if (!file) return;
+    if (file.size > MAX_ANSWER_KEY_FILE_BYTES) {
+      setFileError("檔案太大，請控制在 8MB 以內");
+      return;
+    }
+    const base64 = await readFileAsBase64(file);
+    setNewFile({ name: file.name, mimeType: file.type, base64 });
+    setFileRemoved(false);
+  }
 
   async function save() {
     setSaving(true);
     try {
       const body: any = { courseWorkId, mode, maxPoints };
       if (mode === "freetext") body.instructions = instructions;
-      if (mode === "answer_key") body.answerKey = answerKey;
+      if (mode === "answer_key") {
+        body.answerKey = answerKey;
+        if (newFile) body.answerKeyFile = newFile;
+        else if (existingFile && !fileRemoved) body.keepAnswerKeyFile = true;
+      }
       if (mode === "rubric") body.rubricItems = items.filter((it) => it.item.trim());
       await api.saveRubric(body);
-      onSaved({ mode, instructions, answerKey, maxPoints, rubricJson: items });
+      onSaved({
+        mode,
+        instructions,
+        answerKey,
+        maxPoints,
+        rubricJson: items,
+        answerKeyFile: newFile ? { name: newFile.name, mimeType: newFile.mimeType } : fileRemoved ? null : existingFile,
+      });
     } finally {
       setSaving(false);
     }
@@ -229,7 +282,35 @@ function RubricEditor({
       )}
 
       {mode === "answer_key" && (
-        <textarea rows={4} placeholder="標準答案內容" value={answerKey} onChange={(e) => setAnswerKey(e.target.value)} />
+        <div>
+          <textarea rows={4} placeholder="標準答案內容（可留空，改用下面上傳檔案）" value={answerKey} onChange={(e) => setAnswerKey(e.target.value)} />
+          <div className="field-row" style={{ marginTop: 8 }}>
+            <label className="field-label" htmlFor="answerKeyFile">
+              或上傳答案檔（圖片／PDF，8MB 內）
+            </label>
+            <input
+              id="answerKeyFile"
+              type="file"
+              accept={ANSWER_KEY_FILE_ACCEPT}
+              onChange={(e) => handleFilePick(e.target.files?.[0])}
+            />
+          </div>
+          {fileError && <p className="error-text">{fileError}</p>}
+          {newFile && <p className="section-hint">已選擇新檔案：{newFile.name}</p>}
+          {!newFile && existingFile && !fileRemoved && (
+            <p className="section-hint">
+              目前已上傳：{existingFile.name}{" "}
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setFileRemoved(true)}
+                style={{ marginLeft: 8 }}
+              >
+                移除
+              </button>
+            </p>
+          )}
+        </div>
       )}
 
       {mode === "rubric" && (
@@ -280,6 +361,7 @@ function RubricSummary({ rubric, onEdit }: { rubric: any; onEdit: () => void }) 
     <div className="card row" style={{ justifyContent: "space-between" }}>
       <div>
         <strong>{label}</strong>（總分 {rubric.maxPoints ?? rubric.max_points}）
+        {rubric.answerKeyFile && <span> ｜ 已上傳答案檔：{rubric.answerKeyFile.name}</span>}
       </div>
       <button className="secondary" onClick={onEdit}>
         重新設定

@@ -23,6 +23,7 @@ export interface Rubric {
   instructions?: string | null;
   rubricJson?: RubricItem[] | null;
   answerKey?: string | null;
+  answerKeyFile?: { name: string; mimeType: string; base64: string } | null;
   maxPoints: number;
 }
 

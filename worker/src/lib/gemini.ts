@@ -17,7 +17,8 @@ function buildRubricInstruction(rubric: Rubric): string {
     const lines = items.map((it) => `- ${it.item}（滿分 ${it.maxPoints}）：${it.description ?? ""}`).join("\n");
     return `評分量表（逐項給分，各項加總＝總分）：\n${lines}\n總分 ${rubric.maxPoints} 分。`;
   }
-  return `標準答案：\n${rubric.answerKey ?? ""}\n請比對學生作答與標準答案的吻合程度給分，總分 ${rubric.maxPoints} 分。`;
+  const fileNote = rubric.answerKeyFile ? `\n另外老師上傳了標準答案檔案（見附件「${rubric.answerKeyFile.name}」，請一併參考）。` : "";
+  return `標準答案：\n${rubric.answerKey ?? "（見附件）"}${fileNote}\n請比對學生作答與標準答案的吻合程度給分，總分 ${rubric.maxPoints} 分。`;
 }
 
 function buildPrompt(rubric: Rubric, studentText: string): string {
@@ -48,15 +49,29 @@ interface GeminiPart {
   inline_data?: { mime_type: string; data: string };
 }
 
-async function callGemini(apiKey: string, model: string, prompt: string, attachments: ExtractedAttachment[], maxPoints: number): Promise<AiGradeResult> {
-  const parts: GeminiPart[] = [{ text: prompt }];
+function pushAttachmentParts(parts: GeminiPart[], attachments: ExtractedAttachment[], label: string) {
   for (const att of attachments) {
     if (att.kind === "text" && att.text) {
-      parts.push({ text: `\n附件「${att.name}」內文：\n${att.text}` });
+      parts.push({ text: `\n${label}「${att.name}」內文：\n${att.text}` });
     } else if ((att.kind === "image" || att.kind === "pdf") && att.base64 && att.mimeType) {
+      parts.push({ text: `\n以下是${label}「${att.name}」：` });
       parts.push({ inline_data: { mime_type: att.mimeType, data: att.base64 } });
     }
   }
+}
+
+async function callGemini(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  attachments: ExtractedAttachment[],
+  answerKeyAttachment: ExtractedAttachment | null,
+  maxPoints: number
+): Promise<AiGradeResult> {
+  const parts: GeminiPart[] = [{ text: prompt }];
+  // 標準答案附件跟學生作答附件分開標註，避免 AI 把老師的答案當成學生自己交的內容
+  if (answerKeyAttachment) pushAttachmentParts(parts, [answerKeyAttachment], "老師提供的標準答案附件");
+  pushAttachmentParts(parts, attachments, "學生作答附件");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
@@ -89,10 +104,18 @@ export async function gradeSubmission(
   attachments: ExtractedAttachment[]
 ): Promise<{ result: AiGradeResult; model: string }> {
   const prompt = buildPrompt(rubric, studentText);
+  const answerKeyAttachment: ExtractedAttachment | null = rubric.answerKeyFile
+    ? {
+        name: rubric.answerKeyFile.name,
+        kind: rubric.answerKeyFile.mimeType === "application/pdf" ? "pdf" : "image",
+        base64: rubric.answerKeyFile.base64,
+        mimeType: rubric.answerKeyFile.mimeType,
+      }
+    : null;
   let lastError: Error | null = null;
   for (const model of MODELS) {
     try {
-      const result = await callGemini(apiKey, model, prompt, attachments, rubric.maxPoints);
+      const result = await callGemini(apiKey, model, prompt, attachments, answerKeyAttachment, rubric.maxPoints);
       return { result, model };
     } catch (e) {
       lastError = e as Error;
