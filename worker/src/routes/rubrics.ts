@@ -34,13 +34,13 @@ const upsertSchema = z.object({
   instructions: z.string().optional(),
   rubricItems: z.array(rubricItemSchema).optional(),
   answerKey: z.string().optional(),
-  // 三選一：換新檔案／保留上次存的檔案／明確移除。都沒帶＝這份評分標準沒有檔案。
+  // 都沒帶＝這次沒換答案檔，維持資料庫裡原本存的（不管是有檔案還是沒檔案）
   answerKeyFile: answerKeyFileSchema.optional(),
-  keepAnswerKeyFile: z.boolean().optional(),
+  removeAnswerKeyFile: z.boolean().optional(),
   maxPoints: z.number().default(100),
 });
 
-// 一份作業目前只設定一套評分規則，取代式儲存（新建立就覆蓋舊的）
+// 一份作業只有一套評分規則，upsert（第一次存是INSERT，之後都是原地UPDATE，不會一直長出新版本）
 rubricRoutes.get("/:courseWorkId", async (c) => {
   const teacherId = c.get("teacherId");
   const courseWorkId = c.req.param("courseWorkId");
@@ -51,7 +51,7 @@ rubricRoutes.get("/:courseWorkId", async (c) => {
   // 沒必要把整包檔案內容送回前端
   const row = await c.env.DB.prepare(
     `SELECT id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, max_points, created_at, updated_at
-     FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1`
+     FROM rubrics WHERE coursework_id = ?`
   )
     .bind(courseWorkId)
     .first();
@@ -75,10 +75,12 @@ rubricRoutes.post("/", async (c) => {
     return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
   }
 
+  // 三種情況：換新檔案／明確移除／兩者都沒帶（這次沒動檔案，UPDATE時完全不碰檔案欄位，維持原樣）
   let fileName: string | null = null;
   let fileMime: string | null = null;
   let fileBase64: string | null = null;
   let fileExtractedText: string | null = null;
+  const touchFileColumns = !!body.answerKeyFile || !!body.removeAnswerKeyFile;
 
   if (body.answerKeyFile) {
     // base64 字串長度 * 3/4 還原成原始位元組數，粗估即可，用來擋過大檔案
@@ -99,30 +101,27 @@ rubricRoutes.post("/", async (c) => {
     } else {
       fileBase64 = body.answerKeyFile.base64;
     }
-  } else if (body.keepAnswerKeyFile) {
-    // 這次沒換檔案，把上一版存的檔案原樣帶到新的一列（取代式儲存，每次存都是新的一列）
-    const prev = await c.env.DB.prepare(
-      "SELECT answer_key_file_name, answer_key_file_mime, answer_key_file_base64, answer_key_file_extracted_text FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1"
-    )
-      .bind(body.courseWorkId)
-      .first<{
-        answer_key_file_name: string | null;
-        answer_key_file_mime: string | null;
-        answer_key_file_base64: string | null;
-        answer_key_file_extracted_text: string | null;
-      }>();
-    fileName = prev?.answer_key_file_name ?? null;
-    fileMime = prev?.answer_key_file_mime ?? null;
-    fileBase64 = prev?.answer_key_file_base64 ?? null;
-    fileExtractedText = prev?.answer_key_file_extracted_text ?? null;
   }
+  // body.removeAnswerKeyFile 時 fileName/fileMime/fileBase64/fileExtractedText 保持 null，
+  // 剛好就是「清空檔案」要寫回去的值
 
   const now = Math.floor(Date.now() / 1000);
   const id = crypto.randomUUID();
 
-  await c.env.DB.prepare(
+  // 檔案欄位只有真的要換/移除時才出現在 SET 子句裡，這次沒動檔案就完全不觸碰那四欄
+  const fileSetClause = touchFileColumns
+    ? ", answer_key_file_name = excluded.answer_key_file_name, answer_key_file_mime = excluded.answer_key_file_mime, answer_key_file_base64 = excluded.answer_key_file_base64, answer_key_file_extracted_text = excluded.answer_key_file_extracted_text"
+    : "";
+
+  // ON CONFLICT時原本的id不會被覆蓋，用RETURNING拿真正存在DB裡的那個id（不是id這個變數，
+  // 那個只在真的新建立時才會派上用場）
+  const saved = await c.env.DB.prepare(
     `INSERT INTO rubrics (id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, answer_key_file_base64, answer_key_file_extracted_text, max_points, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(coursework_id) DO UPDATE SET
+       mode = excluded.mode, instructions = excluded.instructions, rubric_json = excluded.rubric_json,
+       answer_key = excluded.answer_key, max_points = excluded.max_points, updated_at = excluded.updated_at${fileSetClause}
+     RETURNING id`
   )
     .bind(
       id,
@@ -139,7 +138,7 @@ rubricRoutes.post("/", async (c) => {
       now,
       now
     )
-    .run();
+    .first<{ id: string }>();
 
-  return c.json({ id });
+  return c.json({ id: saved?.id ?? id });
 });

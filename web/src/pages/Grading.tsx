@@ -259,8 +259,9 @@ function RubricEditor({
       if (mode === "freetext") body.instructions = instructions;
       if (mode === "answer_key") {
         body.answerKey = answerKey;
+        // 都不帶＝這次沒換檔案，後端會維持原本存的檔案不動；只有真的選新檔或按「移除」才需要講
         if (newFile) body.answerKeyFile = newFile;
-        else if (existingFile && !fileRemoved) body.keepAnswerKeyFile = true;
+        else if (fileRemoved) body.removeAnswerKeyFile = true;
       }
       if (mode === "rubric") body.rubricItems = items.filter((it) => it.item.trim());
       await api.saveRubric(body);
