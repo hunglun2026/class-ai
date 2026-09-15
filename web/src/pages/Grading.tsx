@@ -164,7 +164,7 @@ export default function Grading() {
 const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "freetext", label: "自由文字指令", hint: "最快、最有彈性，適合大多數作業" },
   { value: "rubric", label: "評分量表", hint: "想逐項給分時用" },
-  { value: "answer_key", label: "標準答案比對", hint: "有明確正確答案的題目" },
+  { value: "answer_key", label: "標準答案比對", hint: "有明確正確答案的題目，可貼文字或上傳照片／PDF答案" },
 ];
 
 const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
