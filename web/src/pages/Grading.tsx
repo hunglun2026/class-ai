@@ -108,12 +108,29 @@ export default function Grading() {
   async function gradeOne(s: Submission) {
     markBusy(s.id, true);
     try {
-      await api.aiGrade(s.id);
+      const { grade, model } = await api.aiGrade(s.id);
+      // 後端已經回傳這位學生的完整結果，直接合併進本地狀態就好，不用整班重拉一次
+      // （跟後端 ai-grade 路由的 UPSERT 邏輯對齊：final_score/final_feedback 初始值＝AI 建議值）
+      setSubmissions((prev) =>
+        (prev ?? []).map((row) =>
+          row.id === s.id
+            ? {
+                ...row,
+                ai_score: grade.score,
+                ai_feedback: grade.feedback,
+                final_score: grade.score,
+                final_feedback: grade.feedback,
+                status: "ai_suggested",
+                ai_model: model,
+                ai_raw_json: JSON.stringify(grade),
+              }
+            : row
+        )
+      );
       setFailures((prev) => {
         const { [s.id]: _, ...rest } = prev;
         return rest;
       });
-      await refreshSubmissions();
     } catch (e) {
       setFailures((prev) => ({ ...prev, [s.id]: (e as Error).message }));
     } finally {

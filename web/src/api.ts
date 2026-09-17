@@ -74,9 +74,10 @@ export const api = {
   listSubmissions: (courseWorkId: string) =>
     request<{ submissions: any[] }>(`/api/submissions/${courseWorkId}`),
   aiGrade: (submissionId: string) =>
-    request<{ grade: { score: number; feedback: string }; model: string }>(`/api/submissions/${submissionId}/ai-grade`, {
-      method: "POST",
-    }),
+    request<{
+      grade: { score: number; feedback: string; itemScores?: { item: string; score: number; comment: string }[] };
+      model: string;
+    }>(`/api/submissions/${submissionId}/ai-grade`, { method: "POST" }),
   downloadExport: (courseWorkId: string) =>
     downloadFile(`/api/submissions/${courseWorkId}/export.xlsx`, "成績表.xlsx"),
   updateGrade:(submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>

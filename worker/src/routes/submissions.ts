@@ -7,7 +7,7 @@ import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
 import * as XLSX from "@e965/xlsx";
-import { ownsCourse, ownsCourseWork, ownsSubmission } from "../lib/ownership";
+import { ownsCourse, ownsCourseWork } from "../lib/ownership";
 
 export const submissionRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 submissionRoutes.use("*", requireAuth);
@@ -86,16 +86,21 @@ submissionRoutes.post("/:courseId/:courseWorkId/sync", async (c) => {
 submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
   const teacherId = c.get("teacherId");
   const submissionId = c.req.param("submissionId");
-  if (!(await ownsSubmission(c.env, teacherId, submissionId))) {
-    return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
-  }
 
-  const submission = await c.env.DB.prepare("SELECT * FROM submissions WHERE id = ?").bind(submissionId).first<any>();
-  if (!submission) return c.json({ error: "找不到這份繳交紀錄，請先拉取作業" }, 404);
-
-  const rubricRow = await c.env.DB.prepare(
-    "SELECT * FROM rubrics WHERE coursework_id = ? ORDER BY created_at DESC LIMIT 1"
+  // 權限檢查跟拿資料合成一次 D1 來回（原本是兩次：先查歸屬、查到才再查一次同一筆），
+  // 這支是評分的熱路徑，批次評分一個班要打 N 次
+  const submission = await c.env.DB.prepare(
+    `SELECT s.* FROM submissions s
+     JOIN coursework cw ON cw.id = s.coursework_id
+     JOIN courses c ON c.id = cw.course_id
+     WHERE s.id = ? AND c.teacher_id = ?`
   )
+    .bind(submissionId, teacherId)
+    .first<any>();
+  if (!submission) return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
+
+  // rubrics 09-15 起已改真正 upsert（coursework_id 唯一），一份作業只會有 0 或 1 列，不用再排序取最新
+  const rubricRow = await c.env.DB.prepare("SELECT * FROM rubrics WHERE coursework_id = ?")
     .bind(submission.coursework_id)
     .first<any>();
   if (!rubricRow) return c.json({ error: "這份作業還沒設定評分標準" }, 400);
@@ -238,17 +243,25 @@ const updateGradeBody = z.object({
 submissionRoutes.patch("/:submissionId/grade", async (c) => {
   const teacherId = c.get("teacherId");
   const submissionId = c.req.param("submissionId");
-  if (!(await ownsSubmission(c.env, teacherId, submissionId))) {
-    return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
-  }
   const body = updateGradeBody.parse(await c.req.json());
   const now = Math.floor(Date.now() / 1000);
 
-  await c.env.DB.prepare(
-    `UPDATE grades SET final_score = ?, final_feedback = ?, status = ?, updated_at = ? WHERE submission_id = ?`
+  // 權限檢查併進 UPDATE 的 WHERE，不要跟前面 ai-grade 一樣先查一次歸屬再寫一次——
+  // 這支是老師改分/確認的路徑，每次編輯評語都會打，改完看 changes 判斷有沒有真的動到
+  const result = await c.env.DB.prepare(
+    `UPDATE grades SET final_score = ?, final_feedback = ?, status = ?, updated_at = ?
+     WHERE submission_id = ? AND submission_id IN (
+       SELECT s.id FROM submissions s
+       JOIN coursework cw ON cw.id = s.coursework_id
+       JOIN courses c ON c.id = cw.course_id
+       WHERE c.teacher_id = ?
+     )`
   )
-    .bind(body.finalScore, body.finalFeedback, body.confirm ? "confirmed" : "teacher_edited", now, submissionId)
+    .bind(body.finalScore, body.finalFeedback, body.confirm ? "confirmed" : "teacher_edited", now, submissionId, teacherId)
     .run();
 
+  if (result.meta.changes === 0) {
+    return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
+  }
   return c.json({ ok: true });
 });
