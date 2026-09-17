@@ -84,6 +84,12 @@ h1, h2, h3 { line-height: 1.35; }
 .login-title { font-size: 42px; font-weight: 800; color: var(--brand); margin: 0 0 6px; letter-spacing: -0.03em; }
 .login-subtitle { color: var(--ink-soft); margin: 0 0 24px; }
 .login-hint { font-size: 15px; color: var(--ink-soft); margin: 12px 0 20px; }
+.login-guide-link {
+  display: inline-block; font-size: 15px; font-weight: 600; color: var(--brand);
+  text-decoration: none; margin: 0 0 20px; padding: 8px 16px;
+  border: 1px solid var(--brand-soft); border-radius: 999px; background: var(--brand-soft);
+}
+.login-guide-link:hover { background: #fff; }
 .login-trust {
   list-style: none;
   padding: 14px 18px;

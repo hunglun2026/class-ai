@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>classAI 使用手冊</title>
+<style>
+  :root {
+    --paper: #f6f7fb;
+    --surface: #ffffff;
+    --ink: #1c2434;
+    --ink-soft: #5b6478;
+    --border: #e3e7f0;
+    --brand: #1d4ed8;
+    --brand-dark: #15399e;
+    --brand-soft: #eef3ff;
+    --accent: #b8790a;
+    --accent-soft: #fff6e6;
+    --warn: #b8790a;
+    --warn-soft: #fff6e6;
+    --shot-frame: #eef1f6;
+    --shot-border: #d7dce6;
+    --shadow: rgba(28, 36, 52, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0e1420;
+      --surface: #161d2c;
+      --ink: #e7eaf2;
+      --ink-soft: #9aa3b8;
+      --border: #2a3348;
+      --brand: #7ea2ff;
+      --brand-dark: #5c85ff;
+      --brand-soft: #1b2740;
+      --accent: #ffc266;
+      --accent-soft: #2c2416;
+      --warn: #ffc266;
+      --warn-soft: #2c2416;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0e1420;
+    --surface: #161d2c;
+    --ink: #e7eaf2;
+    --ink-soft: #9aa3b8;
+    --border: #2a3348;
+    --brand: #7ea2ff;
+    --brand-dark: #5c85ff;
+    --brand-soft: #1b2740;
+    --accent: #ffc266;
+    --accent-soft: #2c2416;
+    --warn: #ffc266;
+    --warn-soft: #2c2416;
+    --shadow: rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    line-height: 1.75;
+    font-size: 16px;
+  }
+  img { max-width: 100%; }
+  h1, h2, h3 {
+    font-family: "Noto Serif TC", "Noto Sans TC", serif;
+    color: var(--ink);
+    text-wrap: balance;
+    letter-spacing: 0.01em;
+  }
+  a { color: var(--brand); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace; }
+
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 24px 100px; }
+
+  /* ---------- header ---------- */
+  header.top { text-align: center; padding-bottom: 28px; }
+  .logo-mark {
+    width: 56px; height: 56px; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  header.top h1 { font-size: 30px; font-weight: 900; margin: 0 0 8px; }
+  header.top .tagline { color: var(--ink-soft); font-size: 16px; margin: 0; }
+
+  .quickstart {
+    margin-top: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px 26px;
+    box-shadow: 0 8px 24px -12px var(--shadow);
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .quickstart .row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-bottom: 12px; border-bottom: 1px dashed var(--border);
+  }
+  .quickstart .row:last-of-type { border-bottom: none; padding-bottom: 0; }
+  .quickstart .label { font-size: 13px; color: var(--ink-soft); letter-spacing: 0.06em; text-transform: uppercase; }
+  .quickstart .value { font-size: 17px; font-weight: 700; }
+  .quickstart .value a { text-decoration: none; }
+  .quickstart .value a:hover { text-decoration: underline; }
+  .quickstart .cta {
+    margin-top: 4px; text-align: center;
+    background: var(--brand); color: #fff; text-decoration: none;
+    padding: 12px 20px; border-radius: 999px; font-weight: 700; font-size: 15px;
+    display: block;
+  }
+  .quickstart .cta:hover { background: var(--brand-dark); }
+
+  /* ---------- quick nav ---------- */
+  nav.jump {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+    margin: 32px 0 8px; padding: 0; list-style: none;
+  }
+  nav.jump a {
+    font-size: 14px; text-decoration: none; color: var(--ink-soft);
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 7px 14px; border-radius: 999px; white-space: nowrap;
+  }
+  nav.jump a:hover { color: var(--brand); border-color: var(--brand); }
+
+  /* ---------- callouts ---------- */
+  .callout {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    font-size: 15px;
+    margin: 18px 0;
+  }
+  .callout strong { color: var(--ink); }
+  .callout.info { border-left-color: var(--brand); background: var(--brand-soft); }
+
+  /* ---------- step sections ---------- */
+  section.step {
+    margin-top: 64px;
+    padding-top: 8px;
+    scroll-margin-top: 20px;
+  }
+  .step-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .step-num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 15px; font-weight: 700; color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  section.step h2 { font-size: 24px; margin: 0; }
+  section.step p { margin: 0 0 14px; max-width: 62ch; }
+  section.step ul, section.step ol { margin: 0 0 14px; padding-left: 22px; max-width: 62ch; }
+  section.step li { margin-bottom: 6px; }
+
+  .shot {
+    margin-top: 20px;
+    background: var(--shot-frame);
+    border: 1px solid var(--shot-border);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 10px 30px -16px var(--shadow);
+    overflow-x: auto;
+  }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+  .shot.pair { display: flex; gap: 16px; flex-wrap: wrap; }
+  .shot.pair figure { flex: 1 1 220px; margin: 0; min-width: 0; }
+  .shot.pair img { border-radius: 8px; }
+  .shot figcaption {
+    font-size: 13px; color: var(--ink-soft); text-align: center;
+    margin-top: 10px;
+  }
+
+  table.modes {
+    width: 100%; border-collapse: collapse; margin: 18px 0;
+    font-size: 14.5px;
+  }
+  table.modes th, table.modes td {
+    border: 1px solid var(--border); padding: 10px 12px; text-align: left; vertical-align: top;
+  }
+  table.modes th { background: var(--surface); font-family: "Noto Serif TC", serif; }
+  table.modes td { background: var(--surface); }
+
+  .btn-list { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; }
+  .btn-list li {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; font-size: 14.5px;
+  }
+  .btn-list b { color: var(--brand); }
+
+  /* ---------- FAQ ---------- */
+  .faq-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 14px;
+  }
+  .faq-item .q { font-weight: 700; margin: 0 0 8px; }
+  .faq-item .a { margin: 0; color: var(--ink-soft); }
+  .faq-item .a a { color: var(--brand); }
+
+  footer.page {
+    margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--border);
+    text-align: center; font-size: 13.5px; color: var(--ink-soft);
+  }
+  footer.page .version { font-family: "JetBrains Mono", monospace; }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 28px 16px 80px; }
+    header.top h1 { font-size: 26px; }
+    section.step h2 { font-size: 21px; }
+    .quickstart .row { flex-direction: column; gap: 2px; }
+  }
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="logo-mark" aria-hidden="true">
+      <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M26 12C21 9 14 8 8 9v27c6-1 13 0 18 3 5-3 12-4 18-3V9c-6-1-13 0-18 3Z" stroke="var(--brand)" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M26 12v27" stroke="var(--brand)" stroke-width="2.4"/>
+        <path d="M33 20l6-6 4 4-6 6-5 1 1-5Z" fill="var(--accent)" stroke="var(--accent)" stroke-width="1"/>
+      </svg>
+    </div>
+    <h1>classAI 使用手冊</h1>
+    <p class="tagline">讓 AI 先幫你看過全班作業，你確認、修改，再登記分數。</p>
+
+    <div class="quickstart">
+      <div class="row">
+        <span class="label">網址</span>
+        <span class="value mono"><a href="https://classai.hunglun.com" target="_blank" rel="noopener">classai.hunglun.com</a></span>
+      </div>
+      <div class="row">
+        <span class="label">密碼</span>
+        <span class="value mono">5407</span>
+      </div>
+      <a class="cta" href="https://classai.hunglun.com" target="_blank" rel="noopener">開始使用 →</a>
+    </div>
+  </header>
+
+  <nav class="jump" aria-label="快速跳到">
+    <a href="#start">開始之前</a>
+    <a href="#login">登入</a>
+    <a href="#step1">選課程</a>
+    <a href="#step2">選作業</a>
+    <a href="#step3">設定評分標準</a>
+    <a href="#step4">批改學生</a>
+    <a href="#record">登記成績</a>
+    <a href="#faq">常見問題</a>
+  </nav>
+
+  <section class="step" id="start">
+    <div class="step-head"><span class="step-num">START</span><h2>開始之前</h2></div>
+    <p>一個幫你快速看過全班作業、由 AI 先給參考分數與評語的小工具。串接你的 Google Classroom，把學生繳交的作業（文字、圖片、PDF）抓進來，AI 依照你設定的評分標準給建議分數與評語，你看過、修改，滿意再按「完成批改」。</p>
+    <div class="callout">
+      <strong>AI 給的分數與評語只是草稿，不會自動寫回 Google Classroom。</strong>
+      成績要打幾分還是你決定，改好後用「複製分數與評語」或下載 Excel 成績表，自己回 Classroom 登記。
+    </div>
+    <p>動手之前確認兩件事：</p>
+    <ol>
+      <li>你的 Google 帳號要先被加進「測試使用者」名單才能登入（找負責的人加你的 email）</li>
+      <li>要有一份已經在 Google Classroom 發布、且有學生繳交的作業，才有東西可以改</li>
+    </ol>
+    <p>整個流程只有四步，畫面最上面有一條步驟條隨時看得出自己在哪一步；每一頁左上角都有「← 上一步」，選錯不用重來。</p>
+  </section>
+
+  <section class="step" id="login">
+    <div class="step-head"><span class="step-num">LOGIN</span><h2>登入</h2></div>
+    <p>打開網址先看到密碼頁，輸入 <span class="mono">5407</span> 進站。接著按「用學校 Google 帳號登入」——<strong>請用在 Google Classroom 開課的那個帳號</strong>，用個人 Gmail 登入會找不到課程。</p>
+    <div class="callout info">
+      第一次登入可能看到「Google 尚未驗證這個應用程式」，這是正常的，工具還在小範圍測試，沒送 Google 正式審核。按「進階」→「前往（不安全）」繼續即可，只有測試名單裡的帳號登得進去。授權會列出課程、作業、繳交內容、名冊、雲端硬碟等讀取權限，都只用來抓作業給 AI 看，工具不會修改 Classroom 裡的任何東西。
+    </div>
+    <div class="shot pair">
+      <figure>
+        <img src="assets/step0-password.png" alt="輸入內測密碼的畫面">
+        <figcaption>先輸入密碼進站</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/step0-login.png" alt="用學校 Google 帳號登入的畫面">
+        <figcaption>再用學校帳號登入</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="step" id="step1">
+    <div class="step-head"><span class="step-num">01</span><h2>選課程</h2></div>
+    <p>登入後看到你名下開課中的課程。課程超過 6 門時，上面會出現搜尋框，打課名或班級就能找。找不到任何課程？畫面會提醒你可能登入了個人帳號，按「換一個 Google 帳號登入」換成學校帳號。</p>
+    <div class="shot"><img src="assets/step1-courses.png" alt="選課程畫面，列出老師名下的課程"></div>
+  </section>
+
+  <section class="step" id="step2">
+    <div class="step-head"><span class="step-num">02</span><h2>選作業</h2></div>
+    <p>每份作業會顯示截止日（台灣時間）與滿分，<strong>截止日最近的排在最上面</strong>。作業超過 6 份時也有搜尋框。</p>
+    <div class="shot"><img src="assets/step2-coursework.png" alt="選作業畫面，列出這門課的作業"></div>
+  </section>
+
+  <section class="step" id="step3">
+    <div class="step-head"><span class="step-num">03</span><h2>設定評分標準</h2></div>
+    <p>第一次改這份作業才會出現這一步；設定過的作業會直接跳到第 4 步。三種評分方式選一種：</p>
+    <table class="modes">
+      <tr><th>方式</th><th>適合什麼情況</th><th>怎麼填</th></tr>
+      <tr><td><b>用文字寫要求</b></td><td>大部分作業</td><td>打幾句話告訴 AI 要看什麼</td></tr>
+      <tr><td><b>填項目算分數</b></td><td>想分項目給分，例如作文</td><td>一列一個項目，各自配分</td></tr>
+      <tr><td><b>對照標準答案</b></td><td>有固定答案的題目</td><td>貼答案文字，或上傳照片／PDF／Excel（8MB 內）</td></tr>
+    </table>
+    <p><strong>不知道怎麼寫？按範本就好。</strong> 前兩種方式都有六個範本：作文、閱讀心得、學習單、數學計算題、英文寫作、專題報告，按一下就帶入評分要求與項目，配分依作業總分自動換算，帶入後可以再改。「填項目算分數」時，下面會即時顯示「各項加起來 X 分／總分 Y 分」，加起來不等於總分會變紅字也不能存，可以按「平均分配」一次分好。</p>
+    <p>填完按「儲存，開始批改」直接進到第 4 步。之後要改標準，按第 4 步最上面的「修改評分標準」。</p>
+    <div class="shot"><img src="assets/step3-rubric.png" alt="設定評分標準畫面，三種評分方式與範本"></div>
+  </section>
+
+  <section class="step" id="step4">
+    <div class="step-head"><span class="step-num">04</span><h2>批改學生</h2></div>
+    <p>第一次進來會自動去 Classroom 抓學生繳交，不用自己按；之後學生補交了，再按「更新學生繳交」。</p>
+    <p>按「讓 AI 評分還沒評的 N 位」，AI 同時評好幾位，每評完一位那張卡片就跳出結果，全班大約 1～3 分鐘，可以先切到別的分頁，<strong>但不要關掉這一頁</strong>。這顆按鈕只評還沒評過的學生，不會蓋掉你已經改好的分數；只想評某一位，按那張卡片的「請 AI 評這一位」就好。</p>
+    <div class="callout">
+      評分失敗的卡片會變紅、直接寫出原因：額度暫時滿了就等幾分鐘按「只重評失敗的 N 位」；學生還沒交作業就等交了再更新；檔案讀不到就打開原檔自己批改。
+    </div>
+    <p>AI 的評語固定分三段：【做得好】【可以更好】【下一步】，學生看得懂也知道要怎麼改。每張卡片可以：</p>
+    <ul class="btn-list">
+      <li><b>完成批改</b> — 這一位改好了，卡片收成一行，自動跳到下一位還沒完成的學生</li>
+      <li><b>先存起來</b> — 先存著，之後再回來改</li>
+      <li><b>複製分數與評語</b> — 直接貼到 Classroom 的私人留言或成績評語</li>
+      <li><b>請 AI 重評</b> — 重新評一次（會蓋掉目前的分數和評語）</li>
+    </ul>
+    <p>電腦上在評語框按 <span class="mono">Ctrl + Enter</span>（Mac 是 <span class="mono">Cmd + Enter</span>）就是「完成批改並跳下一位」，一般 Enter 照樣換行。上面的進度條顯示「已完成 X／Y 位」，篩選標籤可以切全部／還沒評分／等你確認／已完成。</p>
+    <div class="shot"><img src="assets/step4-grading.png" alt="批改學生畫面，AI建議分數與評語、老師確認"></div>
+  </section>
+
+  <section class="step" id="record">
+    <div class="step-head"><span class="step-num">END</span><h2>把成績登記進 Classroom</h2></div>
+    <div class="callout">這個工具<strong>不會自動寫回 Classroom</strong>，兩種登記方式都可以：</div>
+    <ol>
+      <li>每位學生按「複製分數與評語」，貼到 Classroom</li>
+      <li>按「下載成績表（Excel）」，得到姓名、分數、評語、狀態四欄的 .xlsx，邊看邊登記，也可以存檔備份</li>
+    </ol>
+  </section>
+
+  <section class="step" id="faq">
+    <div class="step-head"><span class="step-num">FAQ</span><h2>常見問題</h2></div>
+
+    <div class="faq-item">
+      <p class="q">登入失敗，說「沒有取得 refresh_token」？</p>
+      <p class="a">之前登入同意過一次，Google 這次沒再給授權碼。到 <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google 帳號權限管理頁</a> 找到這個應用程式、移除授權，再重新登入一次就會恢復正常。</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="q">學生附件是圖片或掃描的手寫作業，AI 看得懂嗎？</p>
+      <p class="a">看得懂，圖片和 PDF 都會直接給 AI 讀。但字跡潦草、掃描品質差時準確度會下降，更需要你自己看過再確認。</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="q">可以兩個老師一起改同一個班級的作業嗎？</p>
+      <p class="a">目前不行，一門課只認第一個用這個工具同步過的老師帳號。</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="q">我的資料安全嗎？</p>
+      <p class="a">作業內容會交給 Google Gemini 產生評分建議；作業內容與你的 Google 授權金鑰存在 Cloudflare（不是公開網頁），金鑰有加密存放。工具目前是小範圍測試階段，不建議拿正式重要考試的作業來測。</p>
+    </div>
+  </section>
+
+  <footer class="page">
+    <p>功能怪怪的、有想法想改，直接回報就好。</p>
+    <p class="version">classAI v1.1.2 · 由鴻綸科技提供</p>
+  </footer>
+
+</div>
+</body>
+</html>

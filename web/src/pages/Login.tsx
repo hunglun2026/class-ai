@@ -10,6 +10,7 @@ export default function Login() {
         用學校 Google 帳號登入
       </button>
       <p className="login-hint">請用在 Google Classroom 開課的那個帳號，個人 Gmail 會找不到課程。</p>
+      <a className="login-guide-link" href="/guide/">📘 詳細使用說明（圖文教學）</a>
       <ul className="login-trust">
         <li>AI 的分數只是草稿，不會自動寫回 Classroom</li>
         <li>作業內容會交給 Google Gemini 產生評分建議</li>
