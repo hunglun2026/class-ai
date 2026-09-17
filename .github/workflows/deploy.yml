@@ -1,0 +1,42 @@
+name: deploy class-ai-worker
+
+# 作業 AI 評分（classAI）的後端 Worker。
+# 這個 repo（hunglun2026/class-ai）由 ClaudeOnly 的 school/class-ai/ 手動同步上來，
+# 原始碼真正的家在 ClaudeOnly，這裡只負責「push 就自動部署」。
+#
+# ⚠ 本 repo 的 Settings → Secrets and variables → Actions 要加兩個：
+#     CLOUDFLARE_API_TOKEN   = hunglun2026 的 Cloudflare API Token（steve0802\cf-tokens.txt 的 hunglun2026=）
+#     CLOUDFLARE_ACCOUNT_ID  = hunglun2026 帳號的 Account ID（steve0802\cf-account-ids.txt 的 hunglun2026=）
+#
+# Pages（前端 web/）另外由 Cloudflare 自己的 Git 整合處理，跟這支 workflow 無關。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-class-ai-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 安裝相依套件
+        run: npm ci
+      - name: 部署 class-ai-worker 到 Cloudflare（hunglun2026）
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
