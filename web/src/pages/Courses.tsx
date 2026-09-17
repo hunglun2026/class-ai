@@ -10,11 +10,13 @@ interface Course {
 }
 
 const INTRO_DISMISSED_KEY = "classai_intro_dismissed";
+const SEARCH_THRESHOLD = 6;
 
 export default function Courses() {
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [error, setError] = useState("");
   const [showIntro, setShowIntro] = useState(true);
+  const [query, setQuery] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -41,45 +43,92 @@ export default function Courses() {
       .catch((e) => setError(e.message));
   }, []);
 
+  async function switchAccount() {
+    try {
+      await api.logout();
+    } finally {
+      window.location.href = api.loginUrl();
+    }
+  }
+
+  const q = query.trim().toLowerCase();
+  const shown = (courses ?? []).filter(
+    (c) => !q || c.name.toLowerCase().includes(q) || (c.section ?? "").toLowerCase().includes(q)
+  );
+
   return (
     <div>
       <Stepper current={0} />
 
       {showIntro && (
         <div className="intro-card">
-          <button className="intro-close" onClick={dismissIntro} aria-label="關閉">
+          <button className="intro-close" onClick={dismissIntro} aria-label="關閉說明">
             ✕
           </button>
-          <h3>這個工具在幫你做什麼？</h3>
+          <h3>四個步驟改完一份作業</h3>
           <ol className="intro-steps">
-            <li>選一門課、一份作業</li>
-            <li>打幾句話告訴 AI 這次要怎麼評分（有預設可以直接用）</li>
-            <li>AI 幫你先看過全班，給建議分數跟評語</li>
-            <li>你看過覺得可以了再確認，成績還是你自己登記進 Google Classroom</li>
+            <li>選一門課</li>
+            <li>選一份作業</li>
+            <li>告訴 AI 怎麼評分（有作文、學習單等範本，按一下就帶入）</li>
+            <li>AI 先幫全班評一輪，你看過、修改，再按「完成批改」</li>
           </ol>
-          <p className="intro-note">全程不會自動幫你把分數送出去，AI 給的都只是草稿，你隨時可以修改。</p>
+          <p className="intro-note">分數不會自動送回 Classroom，改好後用「複製」或下載 Excel 自己登記。</p>
         </div>
       )}
 
-      <h2>選一門課程</h2>
+      <div className="page-head">
+        <div className="eyebrow">第 1 步</div>
+        <h1 className="page-title">要改哪一門課的作業？</h1>
+      </div>
+
       {error && <p className="error-text">{error}</p>}
-      {!error && !courses && <p>載入課程中…</p>}
-      {courses?.length === 0 && (
-        <p className="empty-hint">
-          Google Classroom 沒有找到你名下的課程，先確認這個 Google 帳號在 Classroom 裡有開課，
-          或是還沒開課的話先去 classroom.google.com 建一門。
-        </p>
+      {!error && !courses && <p className="muted">正在讀取你的 Classroom 課程…</p>}
+
+      {courses && courses.length > SEARCH_THRESHOLD && (
+        <input
+          type="search"
+          className="search-input"
+          placeholder="搜尋課程或班級名稱"
+          aria-label="搜尋課程"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       )}
-      {courses?.map((c) => (
-        <div
-          key={c.id}
-          className="card clickable"
-          onClick={() => navigate(`/courses/${c.id}`, { state: { courseName: c.name } })}
-        >
-          <strong>{c.name}</strong>
-          {c.section && <div style={{ color: "#666" }}>{c.section}</div>}
+
+      {courses?.length === 0 && (
+        <div className="empty-state">
+          <img src="/illust/empty.webp" alt="" width={140} height={140} />
+          <p>
+            <strong>找不到課程</strong>
+            <br />
+            可能是用了個人的 Gmail 登入。請改用在 Google Classroom 開課的<strong>學校帳號</strong>；
+            如果還沒開過課，先到 classroom.google.com 建一門。
+          </p>
+          <button onClick={switchAccount}>換一個 Google 帳號登入</button>
         </div>
-      ))}
+      )}
+      {courses && courses.length > 0 && shown.length === 0 && <p className="muted">沒有符合「{query}」的課程。</p>}
+
+      <div className="pick-list">
+        {shown.map((c) => (
+          <button
+            key={c.id}
+            className="pick-card"
+            onClick={() => navigate(`/courses/${c.id}`, { state: { courseName: c.name } })}
+          >
+            <span className="pick-icon" aria-hidden="true">
+              {c.name.slice(0, 1)}
+            </span>
+            <span className="pick-body">
+              <strong>{c.name}</strong>
+              {c.section && <span className="muted">{c.section}</span>}
+            </span>
+            <span className="pick-arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

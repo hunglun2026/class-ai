@@ -44,6 +44,10 @@ export interface ClassroomCourseWork {
   description?: string;
   maxPoints?: number;
   state: string;
+  // Classroom API 原本就會回傳，作業清單要依截止日排序、卡片上顯示截止日
+  dueDate?: { year: number; month: number; day: number };
+  dueTime?: { hours?: number; minutes?: number };
+  creationTime?: string;
 }
 
 export async function listCourseWork(accessToken: string, courseId: string): Promise<ClassroomCourseWork[]> {

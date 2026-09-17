@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Courses from "./pages/Courses";
 import CourseWork from "./pages/CourseWork";
 import Grading from "./pages/Grading";
+import RubricSetup from "./pages/RubricSetup";
 
 interface Teacher {
   id: string;
@@ -21,7 +22,7 @@ export default function App() {
     api.me().then((r) => setTeacher(r.teacher)).catch(() => setTeacher(null));
   }, []);
 
-  if (teacher === undefined) return <div className="container">載入中…</div>;
+  if (teacher === undefined) return <div className="container muted">載入中…</div>;
   if (teacher === null) return <Login />;
 
   return (
@@ -52,6 +53,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Courses />} />
           <Route path="/courses/:courseId" element={<CourseWork />} />
+          <Route path="/courses/:courseId/coursework/:courseWorkId/setup" element={<RubricSetup />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId" element={<Grading />} />
         </Routes>
       </div>

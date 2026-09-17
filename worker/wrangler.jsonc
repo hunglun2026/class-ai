@@ -27,6 +27,9 @@
   "vars": {
     "ENVIRONMENT": "production",
     "GOOGLE_REDIRECT_URI": "https://class-ai-worker.hunglun2026.workers.dev/api/auth/google/callback",
-    "APP_URL": "https://class-ai.pages.dev"
+    "APP_URL": "https://class-ai.pages.dev",
+    // 跟著 worker/package.json 的 version 走，每次改版一起手動更新兩處；
+    // 只是給 /health 顯示用，方便發布後打線上端點確認真的換新版本上線
+    "APP_VERSION": "1.1.1"
   }
 }

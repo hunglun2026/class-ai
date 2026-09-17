@@ -13,6 +13,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
+/**
+ * 走跟其他 API 同一條 fetch（帶 cookie）把檔案抓成 Blob 再存檔。
+ * 不用 <a href> 直連 Worker：那是跨網域整頁跳轉，正式環境不一定帶得到
+ * 登入 cookie，失敗時老師還會被丟到一頁純 JSON 錯誤訊息。
+ */
+async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `下載失敗（${res.status}）`);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filenameFromHeader(res.headers.get("Content-Disposition")) ?? fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFromHeader(header: string | null): string | undefined {
+  const match = header?.match(/filename\*=UTF-8''([^;]+)/i);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return undefined;
+  }
+}
+
 export const api = {
   loginUrl: () => `${API_BASE}/api/auth/google/login`,
   me: () => request<{ teacher: { id: string; email: string; name: string; picture?: string } | null }>("/api/auth/me"),
@@ -20,7 +53,16 @@ export const api = {
 
   courses: () => request<{ courses: { id: string; name: string; section?: string }[] }>("/api/courses"),
   courseWork: (courseId: string) =>
-    request<{ courseWork: { id: string; title: string; maxPoints?: number }[] }>(`/api/courses/${courseId}/coursework`),
+    request<{
+      courseWork: {
+        id: string;
+        title: string;
+        maxPoints?: number;
+        dueDate?: { year: number; month: number; day: number };
+        dueTime?: { hours?: number; minutes?: number };
+        creationTime?: string;
+      }[];
+    }>(`/api/courses/${courseId}/coursework`),
 
   getRubric: (courseWorkId: string) => request<{ rubric: any | null }>(`/api/rubrics/${courseWorkId}`),
   saveRubric: (body: object) => request<{ id: string }>("/api/rubrics", { method: "POST", body: JSON.stringify(body) }),
@@ -35,6 +77,8 @@ export const api = {
     request<{ grade: { score: number; feedback: string }; model: string }>(`/api/submissions/${submissionId}/ai-grade`, {
       method: "POST",
     }),
-  updateGrade: (submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>
+  downloadExport: (courseWorkId: string) =>
+    downloadFile(`/api/submissions/${courseWorkId}/export.xlsx`, "成績表.xlsx"),
+  updateGrade:(submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>
     request(`/api/submissions/${submissionId}/grade`, { method: "PATCH", body: JSON.stringify(body) }),
 };

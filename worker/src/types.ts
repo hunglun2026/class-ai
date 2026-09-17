@@ -10,6 +10,7 @@ export interface Env {
   GOOGLE_CLIENT_SECRET: string;
   GEMINI_API_KEY: string;
   SESSION_SECRET: string; // 簽 cookie 用
+  APP_VERSION: string;
 }
 
 export interface Variables {

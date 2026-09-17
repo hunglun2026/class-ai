@@ -9,11 +9,12 @@ import { submissionRoutes } from "./routes/submissions";
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.use("*", async (c, next) => {
-  const cors_ = cors({ origin: c.env.APP_URL, credentials: true });
+  // exposeHeaders：成績表下載走 fetch 讀 Blob，前端要讀得到這裡算好的檔名
+  const cors_ = cors({ origin: c.env.APP_URL, credentials: true, exposeHeaders: ["Content-Disposition"] });
   return cors_(c, next);
 });
 
-app.get("/health", (c) => c.json({ ok: true, env: c.env.ENVIRONMENT }));
+app.get("/health", (c) => c.json({ ok: true, env: c.env.ENVIRONMENT, version: c.env.APP_VERSION }));
 
 app.route("/api/auth", authRoutes);
 app.route("/api/courses", courseRoutes);

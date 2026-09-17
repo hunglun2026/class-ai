@@ -40,8 +40,26 @@ ${studentText || "（學生沒有直接輸入文字，內容請參考附件）"}
 請用台灣的教學用語（不要大陸用語、不要 AI 腔），只回傳以下格式的 JSON，不要 markdown 圍欄、不要任何說明文字：
 {
   "score": 數字（0～${rubric.maxPoints}）,${itemSchemaHint}
-  "feedback": "給學生看的評語，具體指出優點與可改進處，三到五句"
-}`;
+  "feedback": "給學生看的評語，固定三段、每段一到兩句，段落之間換行：\\n【做得好】具體指出一個優點\\n【可以更好】具體指出最需要改的一點\\n【下一步】一個學生馬上做得到的動作"
+}
+評語是寫給學生本人看的：用學生年紀看得懂的白話，不用專業術語，不要用 emoji。`;
+}
+
+// 失敗原因分類：路由層拿這個換成老師看得懂的話，模型原始錯誤只進 log，不回傳前端
+export type GradeFailKind = "quota" | "timeout" | "blocked" | "bad_output" | "unknown";
+
+export class GradeError extends Error {
+  constructor(public kind: GradeFailKind, detail: string) {
+    super(detail);
+  }
+}
+
+function classify(msg: string): GradeFailKind {
+  if (/ 429|RESOURCE_EXHAUSTED|quota/i.test(msg)) return "quota";
+  if (/沒有回應|timeout| 503| 504/i.test(msg)) return "timeout";
+  if (/安全過濾|SAFETY|blocked/i.test(msg)) return "blocked";
+  if (/JSON|Unexpected token/i.test(msg)) return "bad_output";
+  return "unknown";
 }
 
 interface GeminiPart {
@@ -123,14 +141,17 @@ export async function gradeSubmission(
           mimeType: rubric.answerKeyFile.mimeType,
         }
     : null;
-  let lastError: Error | null = null;
+  const errors: string[] = [];
   for (const model of MODELS) {
     try {
       const result = await callGemini(apiKey, model, prompt, attachments, answerKeyAttachment, rubric.maxPoints);
       return { result, model };
     } catch (e) {
-      lastError = e as Error;
+      errors.push((e as Error).message);
     }
   }
-  throw new Error(`所有模型都評分失敗：${lastError?.message}`);
+  // 三層都失敗時，只要有任一層是額度問題就算額度（最常見、老師最該知道的原因）
+  const kinds = errors.map(classify);
+  const kind = kinds.includes("quota") ? "quota" : kinds[kinds.length - 1] ?? "unknown";
+  throw new GradeError(kind, `所有模型都評分失敗：${errors.join(" | ")}`);
 }

@@ -5,7 +5,8 @@ import { requireAuth } from "../middleware";
 import { getValidAccessToken } from "../lib/tokens";
 import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
-import { gradeSubmission } from "../lib/gemini";
+import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
+import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork, ownsSubmission } from "../lib/ownership";
 
 export const submissionRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -20,7 +21,7 @@ interface AttachmentRecord {
 }
 
 const SUBMISSIONS_SELECT = `
-  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model
+  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
 
@@ -121,15 +122,27 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
   const accessToken = await getValidAccessToken(c.env, teacherId);
   const attachmentRecords: AttachmentRecord[] = submission.attachments_json ? JSON.parse(submission.attachments_json) : [];
 
+  // 學生沒交、也沒有任何內容：不用浪費一次 AI 額度，直接告訴老師
+  const turnedIn = submission.state === "TURNED_IN" || submission.state === "RETURNED";
+  if (!turnedIn && !submission.content_text && attachmentRecords.length === 0) {
+    return c.json({ error: "這位學生還沒交作業，等他交了再按「更新學生繳交」" }, 400);
+  }
+
   const extracted: ExtractedAttachment[] = [];
+  let unreadable = 0;
   for (const att of attachmentRecords) {
     if (att.type === "doc" && att.driveFileId) {
       try {
         extracted.push(await extractDriveFile(accessToken, att.driveFileId, att.name));
       } catch (e) {
+        unreadable += 1;
         console.error("[ai-grade] 附件讀取失敗", att.name, e);
       }
     }
+  }
+  // 學生只交了附件、而且全部讀不到：AI 沒東西可看，給分只會亂猜
+  if (!submission.content_text && extracted.length === 0 && unreadable > 0) {
+    return c.json({ error: "學生交的檔案讀不到（可能是雲端硬碟權限或檔案格式），請打開原檔自己看" }, 422);
   }
 
   try {
@@ -164,8 +177,55 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     return c.json({ grade: result, model });
   } catch (e) {
     console.error("[ai-grade]", e);
-    return c.json({ error: `AI 評分失敗：${(e as Error).message}` }, 502);
+    const kind: GradeFailKind = e instanceof GradeError ? e.kind : "unknown";
+    return c.json({ error: FRIENDLY_GRADE_ERRORS[kind], kind }, kind === "quota" ? 429 : 502);
   }
+});
+
+const FRIENDLY_GRADE_ERRORS: Record<GradeFailKind, string> = {
+  quota: "AI 使用量暫時滿了，請過幾分鐘再按「只重評失敗的」",
+  timeout: "AI 這次回應太慢，請再按一次「只重評失敗的」",
+  blocked: "這份作業的內容被 AI 的安全機制擋下，請自己批改這一位",
+  bad_output: "AI 這次的回覆格式不對，請再評一次",
+  unknown: "AI 評分沒有成功，請稍後再評一次；一直失敗就請自己批改這一位",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  ai_suggested: "AI 建議（未確認）",
+  teacher_edited: "老師改過（未完成）",
+  confirmed: "已完成批改",
+};
+
+// 匯出全班成績表（.xlsx；CSV 在 Excel 開中文會亂碼）
+submissionRoutes.get("/:courseWorkId/export.xlsx", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  const rows = await c.env.DB.prepare(SUBMISSIONS_SELECT).bind(courseWorkId).all<any>();
+  const cw = await c.env.DB.prepare("SELECT title FROM coursework WHERE id = ?").bind(courseWorkId).first<{ title: string }>();
+
+  const data = rows.results.map((r) => ({
+    姓名: r.student_name,
+    分數: r.final_score ?? r.ai_score ?? "",
+    評語: r.final_feedback ?? r.ai_feedback ?? "",
+    狀態: STATUS_LABELS[r.status ?? ""] ?? "尚未評分",
+  }));
+  const sheet = XLSX.utils.json_to_sheet(data, { header: ["姓名", "分數", "評語", "狀態"] });
+  sheet["!cols"] = [{ wch: 12 }, { wch: 6 }, { wch: 80 }, { wch: 16 }];
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "成績");
+  const bytes = XLSX.write(book, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+
+  // 檔名只留安全字元，避免作業標題裡的引號或換行弄壞標頭
+  const safeTitle = (cw?.title ?? "作業").replace(/[\\/:*?"<>|\r\n]/g, "").slice(0, 60) || "作業";
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="grades.xlsx"; filename*=UTF-8''${encodeURIComponent(safeTitle + "_成績.xlsx")}`,
+    },
+  });
 });
 
 const updateGradeBody = z.object({
