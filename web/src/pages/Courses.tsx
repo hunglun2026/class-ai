@@ -101,8 +101,8 @@ export default function Courses() {
           <p>
             <strong>找不到課程</strong>
             <br />
-            可能是用了個人的 Gmail 登入。請改用在 Google Classroom 開課的<strong>學校帳號</strong>；
-            如果還沒開過課，先到 classroom.google.com 建一門。
+            可能沒有用開課的那個 Google 帳號登入。請改用在 Google Classroom <strong>開課的那個帳號</strong>；
+            如果這個帳號還沒開過課，先到 classroom.google.com 建一門。
           </p>
           <button onClick={switchAccount}>換一個 Google 帳號登入</button>
         </div>
