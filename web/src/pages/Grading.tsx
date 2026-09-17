@@ -23,6 +23,12 @@ type Filter = "all" | "todo" | "review" | "done" | "failed";
 
 const BATCH_CONCURRENCY = 3;
 
+// 跟後端 submissions.ts 的 turnedIn 判斷一致：state 是 Classroom 原始值（NEW/CREATED/
+// TURNED_IN/RETURNED/RECLAIMED_BY_STUDENT），不是老師改分的狀態
+function hasTurnedIn(s: Submission): boolean {
+  return s.state === "TURNED_IN" || s.state === "RETURNED";
+}
+
 export default function Grading() {
   const { courseId, courseWorkId } = useParams();
   const location = useLocation();
@@ -158,21 +164,23 @@ export default function Grading() {
   }
 
   const list = submissions ?? [];
+  // 還沒繳交的學生（state 不是 TURNED_IN/RETURNED）沒東西可評，不算進「還沒評分」，
+  // 也不會被批次評分抓進去——不然點下去只會送出註定失敗的請求，白白佔一個併發名額
   const counts = useMemo(
     () => ({
       all: list.length,
-      todo: list.filter((s) => !s.status).length,
+      todo: list.filter((s) => !s.status && hasTurnedIn(s)).length,
       review: list.filter((s) => s.status === "ai_suggested" || s.status === "teacher_edited").length,
       done: list.filter((s) => s.status === "confirmed").length,
       failed: list.filter((s) => failures[s.id]).length,
     }),
     [list, failures]
   );
-  const ungraded = list.filter((s) => !s.status && !failures[s.id]);
+  const ungraded = list.filter((s) => !s.status && !failures[s.id] && hasTurnedIn(s));
   const failedList = list.filter((s) => failures[s.id]);
 
   const visible = list.filter((s) => {
-    if (filter === "todo") return !s.status;
+    if (filter === "todo") return !s.status && hasTurnedIn(s);
     if (filter === "review") return s.status === "ai_suggested" || s.status === "teacher_edited";
     if (filter === "done") return s.status === "confirmed";
     if (filter === "failed") return !!failures[s.id];
@@ -200,8 +208,11 @@ export default function Grading() {
   }
 
   const maxPoints = rubric?.maxPoints ?? rubric?.max_points ?? assignment?.maxPoints ?? 100;
-  const allDone = list.length > 0 && counts.done === list.length;
-  const percent = list.length ? Math.round((counts.done / list.length) * 100) : 0;
+  // 進度以「有交作業的人」為分母：班上只要有一位缺交，用全班人數當分母就永遠到不了
+  // 100%，「全班都批改完了」的提示也永遠不會出現，即使老師該做的都做完了
+  const gradableCount = list.filter(hasTurnedIn).length;
+  const allDone = gradableCount > 0 && counts.done === gradableCount;
+  const percent = gradableCount ? Math.round((counts.done / gradableCount) * 100) : 0;
 
   const FILTERS: { key: Filter; label: string; n: number }[] = [
     { key: "all", label: "全部", n: counts.all },
@@ -244,9 +255,9 @@ export default function Grading() {
       {error && <p className="error-text">{error}</p>}
 
       <div className="toolbar card">
-        <div className="progress-wrap" aria-label={`已完成 ${counts.done} 位，共 ${counts.all} 位`}>
+        <div className="progress-wrap" aria-label={`已完成 ${counts.done} 位，共 ${gradableCount} 位有交作業`}>
           <div className="progress-label">
-            已完成 <strong>{counts.done}</strong> ／ {counts.all} 位
+            已完成 <strong>{counts.done}</strong> ／ {gradableCount} 位（已交作業的人數）
           </div>
           <div className="progress">
             <div className="progress-fill" style={{ width: `${percent}%` }} />
@@ -422,6 +433,7 @@ function SubmissionCard({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const turnedIn = hasTurnedIn(submission);
   const badge = failure
     ? { cls: "failed", label: "評分失敗" }
     : busy
@@ -430,7 +442,9 @@ function SubmissionCard({
         ? { cls: "confirmed", label: "已完成" }
         : submission.status
           ? { cls: "review", label: "等你確認" }
-          : { cls: "todo", label: "還沒評分" };
+          : turnedIn
+            ? { cls: "todo", label: "還沒評分" }
+            : { cls: "waiting", label: "還沒繳交" };
 
   // 已完成的卡片收成一行，全班頁面才不會越改越長
   if (confirmed && !expanded) {
@@ -471,7 +485,9 @@ function SubmissionCard({
         </div>
       </div>
 
-      {submission.content_text ? (
+      {!turnedIn ? (
+        <p className="muted small-text">這位學生還沒繳交這份作業，等他交了按「更新學生繳交」。</p>
+      ) : submission.content_text ? (
         <div className={`submission-text ${longText && !showFull ? "clamped" : ""}`}>{submission.content_text}</div>
       ) : (
         <p className="muted small-text">學生交的是檔案，AI 評分時會一起讀。</p>
@@ -568,8 +584,8 @@ function SubmissionCard({
           </div>
         </div>
       ) : (
-        <button className="card-grade-btn" onClick={onAiGrade} disabled={busy}>
-          {busy ? "AI 評分中…" : failure ? "再評一次" : "請 AI 評這一位"}
+        <button className="card-grade-btn" onClick={onAiGrade} disabled={busy || !turnedIn} title={!turnedIn ? "這位學生還沒繳交，交了才能評分" : undefined}>
+          {busy ? "AI 評分中…" : !turnedIn ? "還沒繳交" : failure ? "再評一次" : "請 AI 評這一位"}
         </button>
       )}
     </div>

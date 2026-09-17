@@ -48,6 +48,12 @@ export async function exchangeCodeForTokens(env: Env, code: string): Promise<Tok
   return res.json();
 }
 
+// refresh_token 失效專用的錯誤類別：跟其他 Google API 錯誤分開，讓路由/全域錯誤處理
+// 能辨識出「老師要重新登入」跟「暫時性錯誤」的差別，給出看得懂的訊息而不是通用的
+// 「系統暫時發生問題」。這個情況真的會發生：測試中狀態的未驗證 App，Google 規定
+// refresh_token 大約 7 天就會過期，老師用一陣子後一定會撞到。
+export class GoogleAuthExpiredError extends Error {}
+
 export async function refreshAccessToken(env: Env, refreshToken: string): Promise<{ accessToken: string; expiresIn: number }> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -59,7 +65,14 @@ export async function refreshAccessToken(env: Env, refreshToken: string): Promis
       grant_type: "refresh_token",
     }),
   });
-  if (!res.ok) throw new Error(`Google token 刷新失敗：${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const detail = await res.text();
+    // invalid_grant：refresh_token 過期或被撤銷，只有重新登入救得回來，其他錯誤才算暫時性問題
+    if (detail.includes("invalid_grant")) {
+      throw new GoogleAuthExpiredError("Google 授權已過期或被取消，請登出後重新登入一次");
+    }
+    throw new Error(`Google token 刷新失敗：${res.status} ${detail}`);
+  }
   const data = await res.json<{ access_token: string; expires_in: number }>();
   return { accessToken: data.access_token, expiresIn: data.expires_in };
 }

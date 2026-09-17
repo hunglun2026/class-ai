@@ -21,10 +21,16 @@ function dueOf(w: Work): Date | null {
   return new Date(Date.UTC(year, month - 1, day, w.dueTime?.hours ?? 23, w.dueTime?.minutes ?? 59));
 }
 
+// 用 getHours()/getDate() 這類本地時間函式，顯示出來的其實是「瀏覽器系統時區」，
+// 只有系統時區剛好是台灣時才會恰好正確——直接把UTC時間手動平移8小時再用getUTC*讀，
+// 不管老師的電腦/手機設定在哪個時區，顯示的永遠是台灣時間
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
 function formatDue(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）${hh}:${mm} 截止`;
+  const t = new Date(d.getTime() + TAIPEI_OFFSET_MS);
+  const hh = String(t.getUTCHours()).padStart(2, "0");
+  const mm = String(t.getUTCMinutes()).padStart(2, "0");
+  return `${t.getUTCMonth() + 1}/${t.getUTCDate()}（${WEEKDAYS[t.getUTCDay()]}）${hh}:${mm} 截止`;
 }
 
 // 截止日最近的排前面（包含剛過期的），沒設截止日的依建立時間排在最後

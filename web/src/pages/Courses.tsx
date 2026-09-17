@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import Stepper from "../components/Stepper";
 
 interface Course {
@@ -15,6 +15,7 @@ const SEARCH_THRESHOLD = 6;
 export default function Courses() {
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [error, setError] = useState("");
+  const [authExpired, setAuthExpired] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
@@ -40,7 +41,10 @@ export default function Courses() {
     api
       .courses()
       .then((r) => setCourses(r.courses))
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        setError(e.message);
+        setAuthExpired(e instanceof ApiError && e.code === "auth_expired");
+      });
   }, []);
 
   async function switchAccount() {
@@ -81,7 +85,19 @@ export default function Courses() {
         <h1 className="page-title">要改哪一門課的作業？</h1>
       </div>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <p className="error-text">
+          {error}
+          {authExpired && (
+            <>
+              {" "}
+              <button className="secondary small" onClick={switchAccount}>
+                重新登入
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {!error && !courses && <p className="muted">正在讀取你的 Classroom 課程…</p>}
 
       {courses && courses.length > SEARCH_THRESHOLD && (

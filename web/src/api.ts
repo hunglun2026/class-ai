@@ -1,5 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
 
+// code==="auth_expired"：Google 授權過期（測試中App的refresh_token約7天到期），
+// 畫面上要給「重新登入」按鈕，不是當成一般錯誤只顯示文字
+export class ApiError extends Error {
+  constructor(message: string, public code?: string) {
+    super(message);
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -8,7 +16,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `請求失敗（${res.status}）`);
+    throw new ApiError(body.error ?? `請求失敗（${res.status}）`, body.code);
   }
   return res.json();
 }
