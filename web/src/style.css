@@ -475,6 +475,7 @@ textarea:focus, input:focus, select:focus {
 .submission-card.status-busy { border-left-color: var(--brand); }
 .submission-card.collapsed { padding: 8px 12px; }
 .collapsed-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.collapsed-position { font-size: 13px; min-width: 30px; }
 .collapsed-row .student-name { flex: 1; min-width: 80px; }
 .score-pill { font-weight: 700; color: var(--st-done); white-space: nowrap; }
 .student-name { font-size: 19px; }

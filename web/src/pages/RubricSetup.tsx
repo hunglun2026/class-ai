@@ -24,13 +24,13 @@ const DEFAULT_INSTRUCTIONS =
 export const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "freetext", label: "用文字寫要求", hint: "打幾句話告訴 AI 怎麼改，適合大部分作業" },
   { value: "rubric", label: "填項目算分數", hint: "分成幾個項目各自配分，例如作文" },
-  { value: "answer_key", label: "對照標準答案", hint: "有固定答案的題目，可以貼文字或上傳照片／PDF／Excel" },
+  { value: "answer_key", label: "上傳檔案評分", hint: "有固定答案的題目，可以貼文字或上傳照片／PDF／Excel" },
 ];
 
 export const MODE_LABEL: Record<Mode, string> = {
   freetext: "用文字寫要求",
   rubric: "填項目算分數",
-  answer_key: "對照標準答案",
+  answer_key: "上傳檔案評分",
 };
 
 const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;

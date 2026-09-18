@@ -451,6 +451,7 @@ function SubmissionCard({
     return (
       <div ref={innerRef} className="card submission-card collapsed">
         <div className="collapsed-row">
+          <span className="muted collapsed-position">{position}</span>
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
           <strong className="student-name">{submission.student_name}</strong>
           <span className="score-pill">
