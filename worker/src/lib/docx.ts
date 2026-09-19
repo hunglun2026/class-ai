@@ -59,7 +59,21 @@ function walkBody(nodes: XmlNode[]): string {
 }
 
 export function extractDocxText(bytes: Uint8Array): string {
-  const unzipped = unzipSync(bytes);
+  // 只解壓內文那一個檔：docx 裡的圖片可能幾十 MB，全部解開會吃光 Worker 記憶體。
+  // 解壓後超過 20MB 的內文不正常（壓縮炸彈），直接當讀不到
+  const MAX_XML_BYTES = 20 * 1024 * 1024;
+  let tooBig = false;
+  const unzipped = unzipSync(bytes, {
+    filter: (f) => {
+      if (f.name !== "word/document.xml") return false;
+      if (f.originalSize > MAX_XML_BYTES) {
+        tooBig = true;
+        return false;
+      }
+      return true;
+    },
+  });
+  if (tooBig) throw new Error("docx 內文解壓後超過 20MB");
   const xmlBytes = unzipped["word/document.xml"];
   if (!xmlBytes) return "";
   const xml = new TextDecoder().decode(xmlBytes);

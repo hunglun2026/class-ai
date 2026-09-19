@@ -4,6 +4,7 @@ import type { Env, Variables } from "../types";
 import { requireAuth } from "../middleware";
 import { ownsCourseWork } from "../lib/ownership";
 import { extractExcelText } from "../lib/excel";
+import { base64ToBytes } from "../lib/base64";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
@@ -14,8 +15,9 @@ const rubricItemSchema = z.object({
   description: z.string().optional(),
 });
 
-// 8MB 原始檔案上限（base64 字串長度約是原始位元組的 4/3 倍），擋過大檔案塞爆 D1 那一列
-const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
+// 8MB 原始檔案上限（base64 字串長度約是原始位元組的 4/3 倍）。圖片/PDF 存 R2 不受 D1 單列 2MB 限制，
+// 這個上限是為了評分時整包載入 Worker 記憶體（128MB）還有餘裕，跟學生附件共用 submissions.ts 的總量預算
+export const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
 const EXCEL_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "application/vnd.ms-excel", // .xls
@@ -78,9 +80,18 @@ rubricRoutes.post("/", async (c) => {
   // 三種情況：換新檔案／明確移除／兩者都沒帶（這次沒動檔案，UPDATE時完全不碰檔案欄位，維持原樣）
   let fileName: string | null = null;
   let fileMime: string | null = null;
-  let fileBase64: string | null = null;
   let fileExtractedText: string | null = null;
+  let fileR2Key: string | null = null;
   const touchFileColumns = !!body.answerKeyFile || !!body.removeAnswerKeyFile;
+
+  // 換檔／移除時要先記下舊的 R2 物件，DB 寫成功後再刪，不然會留下沒人用的孤兒檔
+  const oldR2Key = touchFileColumns
+    ? (
+        await c.env.DB.prepare("SELECT answer_key_file_r2_key FROM rubrics WHERE coursework_id = ?")
+          .bind(body.courseWorkId)
+          .first<{ answer_key_file_r2_key: string | null }>()
+      )?.answer_key_file_r2_key ?? null
+    : null;
 
   if (body.answerKeyFile) {
     // base64 字串長度 * 3/4 還原成原始位元組數，粗估即可，用來擋過大檔案
@@ -99,46 +110,63 @@ rubricRoutes.post("/", async (c) => {
         return c.json({ error: `Excel 檔案解析失敗，請確認檔案沒有損壞：${(e as Error).message}` }, 400);
       }
     } else {
-      fileBase64 = body.answerKeyFile.base64;
+      // 圖片/PDF 放 R2：D1 單列上限 2MB，base64 後原始檔超過約 1.4MB 就存不進 D1
+      fileR2Key = `answer-keys/${body.courseWorkId}/${crypto.randomUUID()}`;
+      await c.env.ATTACHMENTS.put(fileR2Key, base64ToBytes(body.answerKeyFile.base64), {
+        httpMetadata: { contentType: fileMime },
+      });
     }
   }
-  // body.removeAnswerKeyFile 時 fileName/fileMime/fileBase64/fileExtractedText 保持 null，
+  // body.removeAnswerKeyFile 時 fileName/fileMime/fileR2Key/fileExtractedText 保持 null，
   // 剛好就是「清空檔案」要寫回去的值
 
   const now = Math.floor(Date.now() / 1000);
   const id = crypto.randomUUID();
 
-  // 檔案欄位只有真的要換/移除時才出現在 SET 子句裡，這次沒動檔案就完全不觸碰那四欄
+  // 檔案欄位只有真的要換/移除時才出現在 SET 子句裡，這次沒動檔案就完全不觸碰那幾欄。
+  // answer_key_file_base64 是 R2 之前的舊存法，換檔／移除時一併清成 NULL
   const fileSetClause = touchFileColumns
-    ? ", answer_key_file_name = excluded.answer_key_file_name, answer_key_file_mime = excluded.answer_key_file_mime, answer_key_file_base64 = excluded.answer_key_file_base64, answer_key_file_extracted_text = excluded.answer_key_file_extracted_text"
+    ? ", answer_key_file_name = excluded.answer_key_file_name, answer_key_file_mime = excluded.answer_key_file_mime, answer_key_file_base64 = NULL, answer_key_file_extracted_text = excluded.answer_key_file_extracted_text, answer_key_file_r2_key = excluded.answer_key_file_r2_key"
     : "";
 
   // ON CONFLICT時原本的id不會被覆蓋，用RETURNING拿真正存在DB裡的那個id（不是id這個變數，
   // 那個只在真的新建立時才會派上用場）
-  const saved = await c.env.DB.prepare(
-    `INSERT INTO rubrics (id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, answer_key_file_base64, answer_key_file_extracted_text, max_points, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(coursework_id) DO UPDATE SET
-       mode = excluded.mode, instructions = excluded.instructions, rubric_json = excluded.rubric_json,
-       answer_key = excluded.answer_key, max_points = excluded.max_points, updated_at = excluded.updated_at${fileSetClause}
-     RETURNING id`
-  )
-    .bind(
-      id,
-      body.courseWorkId,
-      body.mode,
-      body.instructions ?? null,
-      body.rubricItems ? JSON.stringify(body.rubricItems) : null,
-      body.answerKey ?? null,
-      fileName,
-      fileMime,
-      fileBase64,
-      fileExtractedText,
-      body.maxPoints,
-      now,
-      now
+  let saved: { id: string } | null;
+  try {
+    saved = await c.env.DB.prepare(
+      `INSERT INTO rubrics (id, coursework_id, mode, instructions, rubric_json, answer_key, answer_key_file_name, answer_key_file_mime, answer_key_file_extracted_text, answer_key_file_r2_key, max_points, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(coursework_id) DO UPDATE SET
+         mode = excluded.mode, instructions = excluded.instructions, rubric_json = excluded.rubric_json,
+         answer_key = excluded.answer_key, max_points = excluded.max_points, updated_at = excluded.updated_at${fileSetClause}
+       RETURNING id`
     )
-    .first<{ id: string }>();
+      .bind(
+        id,
+        body.courseWorkId,
+        body.mode,
+        body.instructions ?? null,
+        body.rubricItems ? JSON.stringify(body.rubricItems) : null,
+        body.answerKey ?? null,
+        fileName,
+        fileMime,
+        fileExtractedText,
+        fileR2Key,
+        body.maxPoints,
+        now,
+        now
+      )
+      .first<{ id: string }>();
+  } catch (e) {
+    // DB 沒寫成功，剛放進 R2 的新檔就沒人指到了，刪掉
+    if (fileR2Key) await c.env.ATTACHMENTS.delete(fileR2Key).catch(() => {});
+    throw e;
+  }
+
+  if (oldR2Key && oldR2Key !== fileR2Key) {
+    // 舊檔刪不掉只是多佔一點空間，不影響這次儲存
+    await c.env.ATTACHMENTS.delete(oldR2Key).catch((e) => console.error("[rubrics] 舊答案檔刪除失敗", oldR2Key, e));
+  }
 
   return c.json({ id: saved?.id ?? id });
 });

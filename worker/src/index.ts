@@ -8,6 +8,7 @@ import { submissionRoutes } from "./routes/submissions";
 import { calibrationRoutes } from "./routes/calibration";
 import { rubricTemplateRoutes } from "./routes/rubricTemplates";
 import { GoogleAuthExpiredError } from "./lib/google-oauth";
+import { ZodError } from "zod";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -27,6 +28,11 @@ app.route("/api/calibration", calibrationRoutes);
 app.route("/api/rubric-templates", rubricTemplateRoutes);
 
 app.onError((err, c) => {
+  // 前端送來的資料格式不對（zod 驗證沒過）是請求的問題不是系統壞了，回 400；細節只進 log
+  if (err instanceof ZodError) {
+    console.warn(`[BAD_REQUEST] ${c.req.method} ${c.req.url}:`, JSON.stringify(err.issues).slice(0, 500));
+    return c.json({ error: "送出的資料格式不對，請重新整理頁面再試一次" }, 400);
+  }
   console.error(`[CRITICAL_ERROR] ${c.req.method} ${c.req.url}:`, err);
   // Google 授權過期不是「系統壞了」，是老師要重新登入——回具體訊息＋401，
   // 不要跟其他真正的系統錯誤混在一起變成看不懂的「系統暫時發生問題」

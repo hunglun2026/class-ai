@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware";
 import { getValidAccessToken } from "../lib/tokens";
 import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
+import { bytesToBase64 } from "../lib/base64";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
 import { computeConfidenceFlags } from "../lib/confidence";
 import * as XLSX from "@e965/xlsx";
@@ -20,6 +21,10 @@ interface AttachmentRecord {
   mimeType?: string;
   url?: string;
 }
+
+// 一次評分所有要下載的檔案（標準答案檔＋學生附件）原始大小合計上限。Gemini 一次可收 100MB，
+// 但 Worker 只有 128MB 記憶體，原始位元組、base64、JSON 本體會同時存在，約吃掉 4 倍，20MB 是安全值
+const MAX_TOTAL_INLINE_BYTES = 20 * 1024 * 1024;
 
 const SUBMISSIONS_SELECT = `
   SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags
@@ -146,7 +151,7 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     rubricJson: rubricRow.rubric_json ? JSON.parse(rubricRow.rubric_json) : null,
     answerKey: rubricRow.answer_key,
     answerKeyFile:
-      rubricRow.answer_key_file_base64 || rubricRow.answer_key_file_extracted_text
+      rubricRow.answer_key_file_r2_key || rubricRow.answer_key_file_base64 || rubricRow.answer_key_file_extracted_text
         ? {
             name: rubricRow.answer_key_file_name,
             mimeType: rubricRow.answer_key_file_mime,
@@ -166,21 +171,56 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     return c.json({ error: "這位學生還沒交作業，等他交了再按「更新學生繳交」" }, 400);
   }
 
+  // 標準答案檔存在 R2（09-19 起），舊資料還在 D1 的 base64 欄位就照舊用
+  let answerKeyBytes = 0;
+  if (rubric.answerKeyFile && rubricRow.answer_key_file_r2_key) {
+    const obj = await c.env.ATTACHMENTS.get(rubricRow.answer_key_file_r2_key);
+    if (!obj) {
+      console.error("[ai-grade] R2 找不到答案檔", rubricRow.answer_key_file_r2_key);
+      return c.json({ error: "標準答案檔讀不到了，請到評分標準頁重新上傳一次" }, 500);
+    }
+    const buf = await obj.arrayBuffer();
+    answerKeyBytes = buf.byteLength;
+    rubric.answerKeyFile.base64 = bytesToBase64(buf);
+  } else if (rubric.answerKeyFile?.base64) {
+    answerKeyBytes = (rubric.answerKeyFile.base64.length * 3) / 4;
+  }
+
+  // 只有真的讀到內容的附件才放進 extracted；太大、讀不到、AI 看不懂的格式（試算表、表單、連結、
+  // 影片…）分開記，不然 AI 會在什麼都沒看到的情況下照樣給分
   const extracted: ExtractedAttachment[] = [];
-  let unreadable = 0;
+  const tooLarge: string[] = [];
+  const unreadable: string[] = [];
+  let remainingBytes = MAX_TOTAL_INLINE_BYTES - answerKeyBytes;
   for (const att of attachmentRecords) {
     if (att.type === "doc" && att.driveFileId) {
       try {
-        extracted.push(await extractDriveFile(accessToken, att.driveFileId, att.name));
+        const got = await extractDriveFile(accessToken, att.driveFileId, att.name, remainingBytes);
+        if (got.kind === "too_large") {
+          tooLarge.push(got.name);
+        } else if (got.kind === "unsupported" || (got.kind === "text" && !got.text?.trim())) {
+          unreadable.push(got.name);
+        } else {
+          remainingBytes -= got.bytes ?? 0;
+          extracted.push(got);
+        }
       } catch (e) {
-        unreadable += 1;
+        unreadable.push(att.name);
         console.error("[ai-grade] 附件讀取失敗", att.name, e);
       }
+    } else {
+      unreadable.push(att.name);
     }
   }
-  // 學生只交了附件、而且全部讀不到：AI 沒東西可看，給分只會亂猜
-  if (!submission.content_text && extracted.length === 0 && unreadable > 0) {
-    return c.json({ error: "學生交的檔案讀不到（可能是雲端硬碟權限或檔案格式），請打開原檔自己看" }, 422);
+  // AI 沒有任何作答內容可看：不叫 AI（給分只會亂猜），說清楚原因請老師自己看
+  if (!submission.content_text?.trim() && extracted.length === 0) {
+    const error =
+      attachmentRecords.length === 0
+        ? "學生按了繳交但沒有寫任何內容、也沒有附檔案，AI 沒東西可以評，請自己確認"
+        : tooLarge.length > 0 && unreadable.length === 0
+          ? "學生交的檔案太大（單檔超過 15MB，或全部加起來超過 20MB），AI 讀不了，請打開原檔自己看"
+          : "學生交的檔案 AI 讀不到（可能是連結、試算表、表單、影片，或雲端硬碟權限不足），請打開原檔自己看";
+    return c.json({ error }, 422);
   }
 
   try {
@@ -188,6 +228,13 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const gradeId = crypto.randomUUID();
     const confidenceFlags = computeConfidenceFlags(rubric, result);
+    // 有附件因為太大沒送給 AI：分數只根據其他內容，老師一定要知道
+    if (tooLarge.length > 0) {
+      confidenceFlags.push(`有 ${tooLarge.length} 個附件太大 AI 沒讀到（${tooLarge.join("、")}），這個分數沒有看過這些檔案`);
+    }
+    if (unreadable.length > 0) {
+      confidenceFlags.push(`有 ${unreadable.length} 個附件 AI 讀不到（${unreadable.join("、")}），這個分數沒有看過這些檔案`);
+    }
     const confidenceFlagsJson = confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null;
 
     await c.env.DB.prepare(
