@@ -38,4 +38,6 @@ export interface AiGradeResult {
   score: number;
   feedback: string;
   itemScores?: { item: string; score: number; comment: string }[];
+  // AI 自己判斷學生內容裡有沒有人在對它下指令（例如要求給滿分）
+  injectionSuspected?: boolean;
 }

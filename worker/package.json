@@ -1,6 +1,6 @@
 {
   "name": "class-ai-worker",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "db:migrate:local": "wrangler d1 migrations apply class_ai_db --local",
     "db:migrate:remote": "wrangler d1 migrations apply class_ai_db --remote",
     "typecheck": "tsc --noEmit",
-    "test:it": "node -e \"require('fs').rmSync('.wrangler/state-it',{recursive:true,force:true})\" && wrangler d1 migrations apply class_ai_db --local --persist-to .wrangler/state-it && tsx test/answer-key-and-attachments.it.mts"
+    "test:it": "node -e \"require('fs').rmSync('.wrangler/state-it',{recursive:true,force:true})\" && wrangler d1 migrations apply class_ai_db --local --persist-to .wrangler/state-it && tsx test/answer-key-and-attachments.it.mts",
+    "test:injection": "tsx test/prompt-injection.it.mts"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

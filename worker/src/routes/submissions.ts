@@ -7,7 +7,7 @@ import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
 import { bytesToBase64 } from "../lib/base64";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
-import { computeConfidenceFlags } from "../lib/confidence";
+import { computeConfidenceFlags, injectionFlag } from "../lib/confidence";
 import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork } from "../lib/ownership";
 
@@ -228,6 +228,12 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const gradeId = crypto.randomUUID();
     const confidenceFlags = computeConfidenceFlags(rubric, result);
+    // 學生試圖對 AI 下指令（要求給滿分之類）：AI 自己的判斷＋後端句型比對，任一成立就警示
+    const injection = injectionFlag(result, [
+      submission.content_text ?? "",
+      ...extracted.map((a) => (a.kind === "text" ? a.text ?? "" : "")),
+    ]);
+    if (injection) confidenceFlags.unshift(injection);
     // 有附件因為太大沒送給 AI：分數只根據其他內容，老師一定要知道
     if (tooLarge.length > 0) {
       confidenceFlags.push(`有 ${tooLarge.length} 個附件太大 AI 沒讀到（${tooLarge.join("、")}），這個分數沒有看過這些檔案`);
