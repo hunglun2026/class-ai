@@ -23,7 +23,13 @@ export default function App() {
   }, []);
 
   if (teacher === undefined) return <div className="container muted">載入中…</div>;
-  if (teacher === null) return <Login />;
+  if (teacher === null)
+    return (
+      <>
+        <Login />
+        <VersionTag />
+      </>
+    );
 
   return (
     <>
@@ -57,6 +63,12 @@ export default function App() {
           <Route path="/courses/:courseId/coursework/:courseWorkId" element={<Grading />} />
         </Routes>
       </div>
+      <VersionTag />
     </>
   );
+}
+
+// 版本號固定顯示在每頁最下方，發布後一眼就能核對線上是不是這一版
+function VersionTag() {
+  return <footer className="app-version">classAI v{__APP_VERSION__}</footer>;
 }

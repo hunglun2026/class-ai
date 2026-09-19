@@ -519,3 +519,4 @@ textarea:focus, input:focus, select:focus {
 @media (hover: none) {
   .hint-line { display: none; }
 }
+.app-version { text-align: center; font-size: 13px; color: var(--ink-soft); padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
