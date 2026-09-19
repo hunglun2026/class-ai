@@ -85,9 +85,25 @@ export const api = {
     request<{
       grade: { score: number; feedback: string; itemScores?: { item: string; score: number; comment: string }[] };
       model: string;
+      confidenceFlags: string[];
     }>(`/api/submissions/${submissionId}/ai-grade`, { method: "POST" }),
   downloadExport: (courseWorkId: string) =>
     downloadFile(`/api/submissions/${courseWorkId}/export.xlsx`, "成績表.xlsx"),
   updateGrade:(submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>
     request(`/api/submissions/${submissionId}/grade`, { method: "PATCH", body: JSON.stringify(body) }),
+  unlockGrade: (submissionId: string) => request(`/api/submissions/${submissionId}/unlock`, { method: "POST" }),
+  gradeHistory: (submissionId: string) =>
+    request<{
+      history: { version_number: number; source: string; score: number | null; feedback: string | null; changed_at: number }[];
+    }>(`/api/submissions/${submissionId}/history`),
+
+  // 老師自己存的常用評分標準（跨作業套用），跟rubrics.ts那個單一作業的評分標準是兩回事
+  myRubricTemplates: () =>
+    request<{ templates: { id: string; name: string; mode: string; max_points: number; created_at: number }[] }>(
+      "/api/rubric-templates"
+    ),
+  getRubricTemplate: (id: string) => request<{ template: any }>(`/api/rubric-templates/${id}`),
+  saveRubricTemplate: (body: object) =>
+    request<{ id: string }>("/api/rubric-templates", { method: "POST", body: JSON.stringify(body) }),
+  deleteRubricTemplate: (id: string) => request(`/api/rubric-templates/${id}`, { method: "DELETE" }),
 };

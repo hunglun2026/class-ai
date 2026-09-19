@@ -359,6 +359,10 @@ textarea:focus, input:focus, select:focus {
 }
 .chip:hover:not(:disabled) { background: #fff; border-color: var(--accent); }
 
+.my-templates-bar { margin-bottom: 10px; }
+.chip-with-delete { display: inline-flex; align-items: center; gap: 2px; }
+.chip-with-delete .icon-btn.small { width: 32px; min-height: 32px; color: #94a3b8; }
+
 .rubric-head { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; font-size: 15px; margin-bottom: 4px; }
 .rubric-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; margin-bottom: 8px; align-items: center; }
 .icon-btn { width: 44px; padding: 0; color: var(--ink-soft); }
@@ -495,9 +499,14 @@ textarea:focus, input:focus, select:focus {
 .fail-box { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--st-fail-bg); color: var(--st-fail); font-weight: 600; }
 .result-box { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .result-box-hint { font-size: 15px; color: #7c4a03; background: var(--st-review-bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; }
+.confidence-warning { font-size: 14px; color: var(--st-fail); background: var(--st-fail-bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; font-weight: 600; }
+.confidence-warning ul { margin: 4px 0 0; padding-left: 20px; font-weight: 400; }
 .item-scores { margin: -4px 0 8px; }
 .item-scores > button { text-align: left; white-space: normal; height: auto; font-weight: 600; }
 .item-scores ul { margin: 4px 0 0; padding-left: 22px; font-size: 15px; }
+.history-box { margin: 8px 0; padding: 8px 12px; background: #f8fafc; border: 1px solid var(--line); border-radius: 10px; }
+.history-box ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.history-box li { margin: 2px 0; }
 .card-actions { margin-top: 10px; }
 @media (max-width: 480px) {
   .card-actions > button { flex: 1 1 calc(50% - 10px); }

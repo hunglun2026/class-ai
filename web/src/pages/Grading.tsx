@@ -17,6 +17,18 @@ interface Submission {
   status: "ai_suggested" | "teacher_edited" | "confirmed" | null;
   ai_model: string | null;
   ai_raw_json: string | null;
+  locked: number | null;
+  confidence_flags: string | null;
+}
+
+function parseConfidenceFlags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 type Filter = "all" | "todo" | "review" | "done" | "failed";
@@ -28,6 +40,14 @@ const BATCH_CONCURRENCY = 3;
 function hasTurnedIn(s: Submission): boolean {
   return s.state === "TURNED_IN" || s.state === "RETURNED";
 }
+
+const HISTORY_SOURCE_LABEL: Record<string, string> = {
+  AI_INITIAL: "AI 初評",
+  AI_REGRADE: "AI 重新評分",
+  TEACHER_EDIT: "老師修改",
+  TEACHER_CONFIRM: "老師確認定案",
+  TEACHER_REOPEN: "老師解鎖重編輯",
+};
 
 export default function Grading() {
   const { courseId, courseWorkId } = useParams();
@@ -114,7 +134,7 @@ export default function Grading() {
   async function gradeOne(s: Submission) {
     markBusy(s.id, true);
     try {
-      const { grade, model } = await api.aiGrade(s.id);
+      const { grade, model, confidenceFlags } = await api.aiGrade(s.id);
       // 後端已經回傳這位學生的完整結果，直接合併進本地狀態就好，不用整班重拉一次
       // （跟後端 ai-grade 路由的 UPSERT 邏輯對齊：final_score/final_feedback 初始值＝AI 建議值）
       setSubmissions((prev) =>
@@ -129,6 +149,8 @@ export default function Grading() {
                 status: "ai_suggested",
                 ai_model: model,
                 ai_raw_json: JSON.stringify(grade),
+                confidence_flags: confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null,
+                locked: 0,
               }
             : row
         )
@@ -389,6 +411,13 @@ function SubmissionCard({
   const [showFull, setShowFull] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showItems, setShowItems] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState("");
+  const [history, setHistory] = useState<
+    { version_number: number; source: string; score: number | null; feedback: string | null; changed_at: number }[] | null
+  >(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     setScore(submission.final_score ?? submission.ai_score ?? 0);
@@ -396,8 +425,41 @@ function SubmissionCard({
   }, [submission.final_score, submission.ai_score, submission.final_feedback, submission.ai_feedback]);
 
   const confirmed = submission.status === "confirmed";
+  const locked = submission.locked === 1;
   const itemScores = parseItemScores(submission.ai_raw_json);
+  const confidenceFlags = parseConfidenceFlags(submission.confidence_flags);
   const longText = (submission.content_text?.length ?? 0) > 220;
+
+  async function unlock() {
+    setUnlocking(true);
+    setUnlockError("");
+    try {
+      await api.unlockGrade(submission.id);
+      await onSaved();
+    } catch (e) {
+      setUnlockError(`解鎖沒有成功：${(e as Error).message}`);
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
+  async function toggleHistory() {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    setHistoryOpen(true);
+    if (history) return;
+    setHistoryLoading(true);
+    try {
+      const r = await api.gradeHistory(submission.id);
+      setHistory(r.history);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function save(confirm: boolean) {
     setSaving(true);
@@ -510,6 +572,16 @@ function SubmissionCard({
           {submission.status === "ai_suggested" && (
             <div className="result-box-hint">這是 AI 的建議，看過沒問題就按「完成批改」，要改直接改。</div>
           )}
+          {confidenceFlags.length > 0 && (
+            <div className="confidence-warning" role="alert">
+              ⚠️ 這筆建議再仔細看一下：
+              <ul>
+                {confidenceFlags.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="row field-row">
             <label className="field-label" htmlFor={`score-${submission.id}`}>
               分數
@@ -521,6 +593,7 @@ function SubmissionCard({
               min={0}
               max={maxPoints}
               value={score}
+              disabled={locked}
               onChange={(e) => setScore(Number(e.target.value))}
               className="input-short"
             />
@@ -555,6 +628,7 @@ function SubmissionCard({
             id={`fb-${submission.id}`}
             rows={5}
             value={feedback}
+            disabled={locked}
             onChange={(e) => setFeedback(e.target.value)}
             onKeyDown={(e) => {
               // Enter 照常換行；Ctrl（Mac 用 Cmd）＋Enter 才是完成並跳下一位
@@ -565,22 +639,57 @@ function SubmissionCard({
             }}
           />
           {saveError && <p className="error-text">{saveError}</p>}
-          <div className="row card-actions">
-            <button onClick={() => save(true)} disabled={saving}>
-              完成批改
-            </button>
-            <button className="secondary" onClick={() => save(false)} disabled={saving}>
-              先存起來
-            </button>
-            <button className="secondary" onClick={copy}>
-              {copied ? "已複製" : "複製分數與評語"}
-            </button>
-            <button className="ghost" onClick={onAiGrade} disabled={busy}>
-              {busy ? "評分中…" : "請 AI 重評"}
-            </button>
-          </div>
+          {unlockError && <p className="error-text">{unlockError}</p>}
+          {locked ? (
+            <div className="row card-actions">
+              <button className="secondary" onClick={copy}>
+                {copied ? "已複製" : "複製分數與評語"}
+              </button>
+              <button className="ghost" onClick={unlock} disabled={unlocking}>
+                {unlocking ? "解鎖中…" : "🔓 解鎖重新編輯"}
+              </button>
+              <button className="ghost small" onClick={toggleHistory}>
+                {historyOpen ? "收起修改歷程" : "看修改歷程"}
+              </button>
+            </div>
+          ) : (
+            <div className="row card-actions">
+              <button onClick={() => save(true)} disabled={saving}>
+                完成批改
+              </button>
+              <button className="secondary" onClick={() => save(false)} disabled={saving}>
+                先存起來
+              </button>
+              <button className="secondary" onClick={copy}>
+                {copied ? "已複製" : "複製分數與評語"}
+              </button>
+              <button className="ghost" onClick={onAiGrade} disabled={busy}>
+                {busy ? "評分中…" : "請 AI 重評"}
+              </button>
+              <button className="ghost small" onClick={toggleHistory}>
+                {historyOpen ? "收起修改歷程" : "看修改歷程"}
+              </button>
+            </div>
+          )}
+          {historyOpen && (
+            <div className="history-box">
+              {historyLoading && <p className="muted small-text">載入中…</p>}
+              {!historyLoading && history?.length === 0 && <p className="muted small-text">還沒有任何修改紀錄。</p>}
+              {!historyLoading && history && history.length > 0 && (
+                <ul>
+                  {history.map((h) => (
+                    <li key={h.version_number}>
+                      <strong>{HISTORY_SOURCE_LABEL[h.source] ?? h.source}</strong>
+                      {h.score != null && ` ｜ ${h.score} 分`}
+                      <span className="muted"> ｜ {new Date(h.changed_at * 1000).toLocaleString("zh-TW")}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="hint-line muted">
-            電腦上可以按 Ctrl＋Enter 完成並跳到下一位
+            {locked ? "這筆已確認鎖定，AI 重評與直接編輯都要先解鎖" : "電腦上可以按 Ctrl＋Enter 完成並跳到下一位"}
             {submission.ai_model && `｜AI 模型：${submission.ai_model}`}
           </div>
         </div>

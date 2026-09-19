@@ -122,6 +122,18 @@ function RubricForm({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [appliedTemplate, setAppliedTemplate] = useState("");
+  const [myTemplates, setMyTemplates] = useState<
+    { id: string; name: string; mode: Mode; max_points: number; created_at: number }[] | null
+  >(null);
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState("");
+
+  useEffect(() => {
+    api
+      .myRubricTemplates()
+      .then((r) => setMyTemplates(r.templates as any))
+      .catch(() => setMyTemplates([]));
+  }, []);
 
   const filledItems = items.filter((it) => it.item.trim());
   // 加總算畫面上每一列（包含還沒取名的），老師看到的數字才跟輸入框對得起來
@@ -142,6 +154,67 @@ function RubricForm({
     setItems(t.items.map((i, idx) => ({ item: i.item, maxPoints: pts[idx] })));
     setAppliedTemplate(t.label);
   }
+
+  async function applyMyTemplate(id: string) {
+    setTemplateError("");
+    try {
+      const { template: t } = await api.getRubricTemplate(id);
+      setMode(t.mode);
+      if (t.mode === "freetext") setInstructions(t.instructions ?? DEFAULT_INSTRUCTIONS);
+      if (t.mode === "answer_key") setAnswerKey(t.answerKey ?? "");
+      if (t.mode === "rubric" && t.rubricJson?.length) {
+        // 範本自己的配分是依它存下來當時的總分算的，套到目前這份作業要照比例換算，
+        // 不是直接搬過來（跟內建範本applyTemplate同一招）
+        const pts = splitPoints(
+          t.rubricJson.map((i: RubricItem) => i.maxPoints),
+          maxPoints
+        );
+        setItems(t.rubricJson.map((i: RubricItem, idx: number) => ({ item: i.item, maxPoints: pts[idx] })));
+      }
+      setAppliedTemplate(t.name);
+    } catch (e) {
+      setTemplateError(`套用範本失敗：${(e as Error).message}`);
+    }
+  }
+
+  async function saveAsTemplate() {
+    const name = window.prompt("這個範本要取什麼名字？（例如：國一作文評分標準）")?.trim();
+    if (!name) return;
+    setTemplateBusy(true);
+    setTemplateError("");
+    try {
+      const body: any = { name, mode, maxPoints };
+      if (mode === "freetext") body.instructions = instructions;
+      if (mode === "rubric") body.rubricItems = filledItems;
+      if (mode === "answer_key") body.answerKey = answerKey;
+      await api.saveRubricTemplate(body);
+      const r = await api.myRubricTemplates();
+      setMyTemplates(r.templates as any);
+    } catch (e) {
+      setTemplateError(`存範本失敗：${(e as Error).message}`);
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
+  async function deleteMyTemplate(id: string) {
+    setTemplateBusy(true);
+    setTemplateError("");
+    try {
+      await api.deleteRubricTemplate(id);
+      setMyTemplates((prev) => (prev ?? []).filter((t) => t.id !== id));
+    } catch (e) {
+      setTemplateError(`刪除失敗：${(e as Error).message}`);
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
+  const canSaveTemplate =
+    !templateBusy &&
+    ((mode === "freetext" && instructions.trim().length > 0) ||
+      (mode === "rubric" && filledItems.length > 0) ||
+      (mode === "answer_key" && answerKey.trim().length > 0));
 
   function splitEvenly() {
     const pts = splitPoints(
@@ -205,6 +278,38 @@ function RubricForm({
           </button>
         ))}
       </div>
+
+      {myTemplates && myTemplates.length > 0 && (
+        <div className="my-templates-bar">
+          <span className="template-label">📂 我的範本：</span>
+          <div className="chip-row">
+            {myTemplates.map((t) => (
+              <span key={t.id} className="chip-with-delete">
+                <button type="button" className="chip" onClick={() => applyMyTemplate(t.id)} disabled={templateBusy}>
+                  {t.name}
+                </button>
+                <button
+                  type="button"
+                  className="ghost icon-btn small"
+                  aria-label={`刪除範本「${t.name}」`}
+                  onClick={() => {
+                    if (window.confirm(`刪除範本「${t.name}」？這個動作不能復原。`)) deleteMyTemplate(t.id);
+                  }}
+                  disabled={templateBusy}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="row" style={{ marginBottom: 14 }}>
+        <button type="button" className="secondary small" onClick={saveAsTemplate} disabled={!canSaveTemplate}>
+          {templateBusy ? "處理中…" : "⭐ 存為我的範本"}
+        </button>
+      </div>
+      {templateError && <p className="error-text">{templateError}</p>}
 
       <div className="row field-row">
         <label className="field-label" htmlFor="maxPoints">

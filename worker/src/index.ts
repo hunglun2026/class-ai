@@ -5,6 +5,8 @@ import { authRoutes } from "./routes/auth";
 import { courseRoutes } from "./routes/courses";
 import { rubricRoutes } from "./routes/rubrics";
 import { submissionRoutes } from "./routes/submissions";
+import { calibrationRoutes } from "./routes/calibration";
+import { rubricTemplateRoutes } from "./routes/rubricTemplates";
 import { GoogleAuthExpiredError } from "./lib/google-oauth";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -21,6 +23,8 @@ app.route("/api/auth", authRoutes);
 app.route("/api/courses", courseRoutes);
 app.route("/api/rubrics", rubricRoutes);
 app.route("/api/submissions", submissionRoutes);
+app.route("/api/calibration", calibrationRoutes);
+app.route("/api/rubric-templates", rubricTemplateRoutes);
 
 app.onError((err, c) => {
   console.error(`[CRITICAL_ERROR] ${c.req.method} ${c.req.url}:`, err);

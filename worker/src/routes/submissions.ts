@@ -6,6 +6,7 @@ import { getValidAccessToken } from "../lib/tokens";
 import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
+import { computeConfidenceFlags } from "../lib/confidence";
 import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork } from "../lib/ownership";
 
@@ -21,9 +22,32 @@ interface AttachmentRecord {
 }
 
 const SUBMISSIONS_SELECT = `
-  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json
+  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
+
+// 每筆評分異動都留一筆歷程（AI初評/AI重評/老師編輯/老師確認/老師解鎖），供老師回顧
+// 「為什麼分數變了」；version_number 用目前已有幾筆歷程+1 算，不是另外維護計數器。
+async function logGradeHistory(
+  db: D1Database,
+  submissionId: string,
+  source: "AI_INITIAL" | "AI_REGRADE" | "TEACHER_EDIT" | "TEACHER_CONFIRM" | "TEACHER_REOPEN",
+  score: number | null,
+  feedback: string | null,
+  now: number
+): Promise<void> {
+  const countRow = await db
+    .prepare("SELECT COUNT(*) AS n FROM grade_history WHERE submission_id = ?")
+    .bind(submissionId)
+    .first<{ n: number }>();
+  await db
+    .prepare(
+      `INSERT INTO grade_history (id, submission_id, version_number, source, score, feedback, changed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(crypto.randomUUID(), submissionId, (countRow?.n ?? 0) + 1, source, score, feedback, now)
+    .run();
+}
 
 // 只讀 D1 快取，不打 Classroom API——AI 評分完刷新畫面走這支，不要每評一個人就整班重拉一次
 submissionRoutes.get("/:courseWorkId", async (c) => {
@@ -99,6 +123,15 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     .first<any>();
   if (!submission) return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
 
+  // 老師確認過的評分會自動鎖定（見 PATCH .../grade），鎖定後「請AI重評」不能悄悄蓋掉——
+  // 這是十輪功能討論的P0：老師人工確認的東西不能被AI重評覆蓋，要先按「解鎖」才能重評。
+  const existingGrade = await c.env.DB.prepare("SELECT locked FROM grades WHERE submission_id = ?")
+    .bind(submissionId)
+    .first<{ locked: number }>();
+  if (existingGrade?.locked) {
+    return c.json({ error: "這筆已經確認鎖定，請先按「解鎖重新評分」才能請AI重評", code: "locked" }, 409);
+  }
+
   // rubrics 09-15 起已改真正 upsert（coursework_id 唯一），一份作業只會有 0 或 1 列，不用再排序取最新
   const rubricRow = await c.env.DB.prepare("SELECT * FROM rubrics WHERE coursework_id = ?")
     .bind(submission.coursework_id)
@@ -154,13 +187,15 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     const { result, model } = await gradeSubmission(c.env.GEMINI_API_KEY, rubric, submission.content_text ?? "", extracted);
     const now = Math.floor(Date.now() / 1000);
     const gradeId = crypto.randomUUID();
+    const confidenceFlags = computeConfidenceFlags(rubric, result);
+    const confidenceFlagsJson = confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null;
 
     await c.env.DB.prepare(
-      `INSERT INTO grades (id, submission_id, rubric_id, ai_score, ai_feedback, ai_raw_json, ai_model, final_score, final_feedback, status, graded_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai_suggested', ?, ?)
+      `INSERT INTO grades (id, submission_id, rubric_id, ai_score, ai_feedback, ai_raw_json, ai_model, confidence_flags, final_score, final_feedback, status, graded_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai_suggested', ?, ?)
        ON CONFLICT(submission_id) DO UPDATE SET
          rubric_id = excluded.rubric_id, ai_score = excluded.ai_score, ai_feedback = excluded.ai_feedback,
-         ai_raw_json = excluded.ai_raw_json, ai_model = excluded.ai_model,
+         ai_raw_json = excluded.ai_raw_json, ai_model = excluded.ai_model, confidence_flags = excluded.confidence_flags,
          final_score = excluded.ai_score, final_feedback = excluded.ai_feedback,
          status = 'ai_suggested', graded_at = excluded.graded_at, updated_at = excluded.updated_at`
     )
@@ -172,6 +207,7 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
         result.feedback,
         JSON.stringify(result),
         model,
+        confidenceFlagsJson,
         result.score,
         result.feedback,
         now,
@@ -179,7 +215,16 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
       )
       .run();
 
-    return c.json({ grade: result, model });
+    await logGradeHistory(
+      c.env.DB,
+      submissionId,
+      existingGrade ? "AI_REGRADE" : "AI_INITIAL",
+      result.score,
+      result.feedback,
+      now
+    );
+
+    return c.json({ grade: result, model, confidenceFlags });
   } catch (e) {
     console.error("[ai-grade]", e);
     const kind: GradeFailKind = e instanceof GradeError ? e.kind : "unknown";
@@ -246,10 +291,25 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
   const body = updateGradeBody.parse(await c.req.json());
   const now = Math.floor(Date.now() / 1000);
 
+  // 已鎖定（老師之前確認過）就不能直接改，要先解鎖——避免老師以為只是改個字，
+  // 卻沒注意到這筆其實已經定案過，改完又忘了重新確認
+  const lockRow = await c.env.DB.prepare(
+    `SELECT g.locked FROM grades g
+     JOIN submissions s ON s.id = g.submission_id
+     JOIN coursework cw ON cw.id = s.coursework_id
+     JOIN courses c ON c.id = cw.course_id
+     WHERE g.submission_id = ? AND c.teacher_id = ?`
+  )
+    .bind(submissionId, teacherId)
+    .first<{ locked: number }>();
+  if (lockRow?.locked) {
+    return c.json({ error: "這筆已經確認鎖定，請先按「解鎖」才能修改", code: "locked" }, 409);
+  }
+
   // 權限檢查併進 UPDATE 的 WHERE，不要跟前面 ai-grade 一樣先查一次歸屬再寫一次——
   // 這支是老師改分/確認的路徑，每次編輯評語都會打，改完看 changes 判斷有沒有真的動到
   const result = await c.env.DB.prepare(
-    `UPDATE grades SET final_score = ?, final_feedback = ?, status = ?, updated_at = ?
+    `UPDATE grades SET final_score = ?, final_feedback = ?, status = ?, locked = ?, updated_at = ?
      WHERE submission_id = ? AND submission_id IN (
        SELECT s.id FROM submissions s
        JOIN coursework cw ON cw.id = s.coursework_id
@@ -257,11 +317,113 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
        WHERE c.teacher_id = ?
      )`
   )
-    .bind(body.finalScore, body.finalFeedback, body.confirm ? "confirmed" : "teacher_edited", now, submissionId, teacherId)
+    .bind(
+      body.finalScore,
+      body.finalFeedback,
+      body.confirm ? "confirmed" : "teacher_edited",
+      body.confirm ? 1 : 0,
+      now,
+      submissionId,
+      teacherId
+    )
     .run();
 
   if (result.meta.changes === 0) {
     return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
   }
+
+  await logGradeHistory(
+    c.env.DB,
+    submissionId,
+    body.confirm ? "TEACHER_CONFIRM" : "TEACHER_EDIT",
+    body.finalScore,
+    body.finalFeedback,
+    now
+  );
+
+  // 老師確認定案時，順手記一筆匿名校正資料（AI分數 vs 老師最終分數），供之後衡量
+  // AI評分可信度。刻意不查、不存學生姓名或作業原文——只要分數差距，記錄失敗也不影響這次確認。
+  if (body.confirm) {
+    try {
+      const info = await c.env.DB.prepare(
+        `SELECT g.ai_score, r.mode, r.max_points FROM grades g
+         JOIN submissions s ON s.id = g.submission_id
+         JOIN rubrics r ON r.coursework_id = s.coursework_id
+         WHERE g.submission_id = ?`
+      )
+        .bind(submissionId)
+        .first<{ ai_score: number | null; mode: string; max_points: number }>();
+      if (info && info.ai_score != null) {
+        await c.env.DB.prepare(
+          `INSERT INTO grading_calibration_logs (id, mode, max_points, ai_score, teacher_final_score, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+          .bind(crypto.randomUUID(), info.mode, info.max_points, info.ai_score, body.finalScore, now)
+          .run();
+      }
+    } catch (e) {
+      console.error("[grading_calibration_logs] 記錄失敗（不影響這次確認）", e);
+    }
+  }
+
   return c.json({ ok: true });
+});
+
+// 解鎖一筆已確認的評分，讓老師可以再編輯／請AI重評；不動分數評語本身，
+// status 退回 teacher_edited（保留老師之前的內容，不是清空重來）
+submissionRoutes.post("/:submissionId/unlock", async (c) => {
+  const teacherId = c.get("teacherId");
+  const submissionId = c.req.param("submissionId");
+  const now = Math.floor(Date.now() / 1000);
+
+  const current = await c.env.DB.prepare(
+    `SELECT g.final_score, g.final_feedback FROM grades g
+     JOIN submissions s ON s.id = g.submission_id
+     JOIN coursework cw ON cw.id = s.coursework_id
+     JOIN courses c ON c.id = cw.course_id
+     WHERE g.submission_id = ? AND c.teacher_id = ?`
+  )
+    .bind(submissionId, teacherId)
+    .first<{ final_score: number; final_feedback: string }>();
+  if (!current) return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
+
+  await c.env.DB.prepare(
+    `UPDATE grades SET locked = 0, status = 'teacher_edited', updated_at = ?
+     WHERE submission_id = ? AND submission_id IN (
+       SELECT s.id FROM submissions s
+       JOIN coursework cw ON cw.id = s.coursework_id
+       JOIN courses c ON c.id = cw.course_id
+       WHERE c.teacher_id = ?
+     )`
+  )
+    .bind(now, submissionId, teacherId)
+    .run();
+
+  await logGradeHistory(c.env.DB, submissionId, "TEACHER_REOPEN", current.final_score, current.final_feedback, now);
+
+  return c.json({ ok: true });
+});
+
+// 這位學生的評分修改歷程（AI初評/AI重評/老師編輯/確認/解鎖），給老師回顧「為什麼分數變了」
+submissionRoutes.get("/:submissionId/history", async (c) => {
+  const teacherId = c.get("teacherId");
+  const submissionId = c.req.param("submissionId");
+
+  const owns = await c.env.DB.prepare(
+    `SELECT 1 FROM submissions s
+     JOIN coursework cw ON cw.id = s.coursework_id
+     JOIN courses c ON c.id = cw.course_id
+     WHERE s.id = ? AND c.teacher_id = ?`
+  )
+    .bind(submissionId, teacherId)
+    .first();
+  if (!owns) return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
+
+  const rows = await c.env.DB.prepare(
+    `SELECT version_number, source, score, feedback, changed_at FROM grade_history
+     WHERE submission_id = ? ORDER BY version_number DESC`
+  )
+    .bind(submissionId)
+    .all();
+  return c.json({ history: rows.results });
 });
