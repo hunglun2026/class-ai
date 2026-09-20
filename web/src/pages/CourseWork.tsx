@@ -49,19 +49,23 @@ function sortWorks(list: Work[]): Work[] {
 export default function CourseWork() {
   const { courseId } = useParams();
   const location = useLocation();
-  const courseName = (location.state as { courseName?: string } | null)?.courseName;
+  const state = location.state as { courseName?: string; teacherCount?: number } | null;
+  const courseName = state?.courseName;
   const [list, setList] = useState<Work[] | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!courseId) return;
+    setError("");
+    setList(null);
     api
       .courseWork(courseId)
       .then((r) => setList(sortWorks(r.courseWork)))
       .catch((e) => setError(e.message));
-  }, [courseId]);
+  }, [courseId, reloadKey]);
 
   const q = query.trim().toLowerCase();
   const shown = (list ?? []).filter((w) => !q || w.title.toLowerCase().includes(q));
@@ -78,7 +82,14 @@ export default function CourseWork() {
         {courseName && <p className="page-sub">{courseName}</p>}
       </div>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <div className="error-text error-box" role="alert">
+          <span>{error}</span>
+          <button className="secondary small" onClick={() => setReloadKey((k) => k + 1)}>
+            再試一次
+          </button>
+        </div>
+      )}
       {!error && !list && <p className="muted">正在讀取作業…</p>}
       {list && list.length > 6 && (
         <input
@@ -106,7 +117,7 @@ export default function CourseWork() {
               className="pick-card"
               onClick={() =>
                 navigate(`/courses/${courseId}/coursework/${w.id}`, {
-                  state: { title: w.title, maxPoints: w.maxPoints, courseName },
+                  state: { title: w.title, maxPoints: w.maxPoints, courseName, teacherCount: state?.teacherCount },
                 })
               }
             >

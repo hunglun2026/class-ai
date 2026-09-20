@@ -9,10 +9,11 @@ import { base64ToBytes } from "../lib/base64";
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
 
+// 長度上限：擋誤貼整本書，也防有人繞過前端灌大量資料
 const rubricItemSchema = z.object({
-  item: z.string(),
-  maxPoints: z.number(),
-  description: z.string().optional(),
+  item: z.string().trim().min(1).max(100),
+  maxPoints: z.number().finite().min(0),
+  description: z.string().max(1000).optional(),
 });
 
 // 8MB 原始檔案上限（base64 字串長度約是原始位元組的 4/3 倍）。圖片/PDF 存 R2 不受 D1 單列 2MB 限制，
@@ -33,13 +34,13 @@ const answerKeyFileSchema = z.object({
 const upsertSchema = z.object({
   courseWorkId: z.string(),
   mode: z.enum(["freetext", "rubric", "answer_key"]),
-  instructions: z.string().optional(),
-  rubricItems: z.array(rubricItemSchema).optional(),
-  answerKey: z.string().optional(),
+  instructions: z.string().max(5000).optional(),
+  rubricItems: z.array(rubricItemSchema).max(30).optional(),
+  answerKey: z.string().max(20000).optional(),
   // 都沒帶＝這次沒換答案檔，維持資料庫裡原本存的（不管是有檔案還是沒檔案）
   answerKeyFile: answerKeyFileSchema.optional(),
   removeAnswerKeyFile: z.boolean().optional(),
-  maxPoints: z.number().default(100),
+  maxPoints: z.number().finite().positive().max(1000).default(100),
 });
 
 // 一份作業只有一套評分規則，upsert（第一次存是INSERT，之後都是原地UPDATE，不會一直長出新版本）
@@ -57,8 +58,23 @@ rubricRoutes.get("/:courseWorkId", async (c) => {
   )
     .bind(courseWorkId)
     .first();
-  if (!row) return c.json({ rubric: null });
+  // 給前端防呆用：這份作業在 Classroom 的滿分、已經評過幾位、目前最高分（改總分時要警告）
+  const stats = await c.env.DB.prepare(
+    `SELECT cw.max_points AS cw_max,
+       (SELECT COUNT(*) FROM grades g JOIN submissions s ON s.id = g.submission_id WHERE s.coursework_id = cw.id) AS graded,
+       (SELECT MAX(g.final_score) FROM grades g JOIN submissions s ON s.id = g.submission_id WHERE s.coursework_id = cw.id) AS max_given
+     FROM coursework cw WHERE cw.id = ?`
+  )
+    .bind(courseWorkId)
+    .first<{ cw_max: number | null; graded: number; max_given: number | null }>();
+  const extra = {
+    courseworkMaxPoints: stats?.cw_max ?? null,
+    gradedCount: stats?.graded ?? 0,
+    maxGivenScore: stats?.max_given ?? null,
+  };
+  if (!row) return c.json({ rubric: null, ...extra });
   return c.json({
+    ...extra,
     rubric: {
       ...row,
       rubricJson: row.rubric_json ? JSON.parse(row.rubric_json as string) : null,
@@ -75,6 +91,17 @@ rubricRoutes.post("/", async (c) => {
   const body = upsertSchema.parse(await c.req.json());
   if (!(await ownsCourseWork(c.env, teacherId, body.courseWorkId))) {
     return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  // 量表模式：至少一項、項目不重複、各項加總等於總分（前端也會擋，這裡防有人繞過）
+  if (body.mode === "rubric") {
+    const items = body.rubricItems ?? [];
+    if (items.length === 0) return c.json({ error: "量表至少要有一個評分項目" }, 400);
+    const names = items.map((it) => it.item.trim());
+    if (new Set(names).size !== names.length) return c.json({ error: "評分項目的名稱不能重複" }, 400);
+    const sum = items.reduce((a, it) => a + it.maxPoints, 0);
+    if (Math.abs(sum - body.maxPoints) > 1e-6) {
+      return c.json({ error: `各項配分加起來是 ${sum} 分，要等於總分 ${body.maxPoints} 分` }, 400);
+    }
   }
 
   // 三種情況：換新檔案／明確移除／兩者都沒帶（這次沒動檔案，UPDATE時完全不碰檔案欄位，維持原樣）
@@ -107,7 +134,8 @@ rubricRoutes.post("/", async (c) => {
       try {
         fileExtractedText = extractExcelText(body.answerKeyFile.base64);
       } catch (e) {
-        return c.json({ error: `Excel 檔案解析失敗，請確認檔案沒有損壞：${(e as Error).message}` }, 400);
+        console.error("[rubrics] Excel 解析失敗", e);
+        return c.json({ error: "這個 Excel 檔讀不出來，可能檔案損壞或有密碼保護。請用 Excel 打開後另存成新的 .xlsx 再上傳" }, 400);
       }
     } else {
       // 圖片/PDF 放 R2：D1 單列上限 2MB，base64 後原始檔超過約 1.4MB 就存不進 D1

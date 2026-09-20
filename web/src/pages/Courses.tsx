@@ -7,6 +7,7 @@ interface Course {
   id: string;
   name: string;
   section?: string;
+  teacherCount?: number;
 }
 
 const INTRO_DISMISSED_KEY = "classai_intro_dismissed";
@@ -18,6 +19,7 @@ export default function Courses() {
   const [authExpired, setAuthExpired] = useState(false);
   const [showIntro, setShowIntro] = useState(true);
   const [query, setQuery] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -38,6 +40,8 @@ export default function Courses() {
   }
 
   useEffect(() => {
+    setError("");
+    setCourses(null);
     api
       .courses()
       .then((r) => setCourses(r.courses))
@@ -45,7 +49,7 @@ export default function Courses() {
         setError(e.message);
         setAuthExpired(e instanceof ApiError && e.code === "auth_expired");
       });
-  }, []);
+  }, [reloadKey]);
 
   async function switchAccount() {
     try {
@@ -86,17 +90,18 @@ export default function Courses() {
       </div>
 
       {error && (
-        <p className="error-text">
-          {error}
-          {authExpired && (
-            <>
-              {" "}
-              <button className="secondary small" onClick={switchAccount}>
-                重新登入
-              </button>
-            </>
+        <div className="error-text error-box" role="alert">
+          <span>{error}</span>
+          {authExpired ? (
+            <button className="secondary small" onClick={switchAccount}>
+              重新登入
+            </button>
+          ) : (
+            <button className="secondary small" onClick={() => setReloadKey((k) => k + 1)}>
+              再試一次
+            </button>
           )}
-        </p>
+        </div>
       )}
       {!error && !courses && <p className="muted">正在讀取你的 Classroom 課程…</p>}
 
@@ -130,14 +135,17 @@ export default function Courses() {
           <button
             key={c.id}
             className="pick-card"
-            onClick={() => navigate(`/courses/${c.id}`, { state: { courseName: c.name } })}
+            onClick={() => navigate(`/courses/${c.id}`, { state: { courseName: c.name, teacherCount: c.teacherCount } })}
           >
             <span className="pick-icon" aria-hidden="true">
               {c.name.slice(0, 1)}
             </span>
             <span className="pick-body">
               <strong>{c.name}</strong>
-              {c.section && <span className="muted">{c.section}</span>}
+              <span className="muted">
+                {c.section}
+                {(c.teacherCount ?? 1) > 1 && `${c.section ? "｜" : ""}${c.teacherCount} 位老師共用`}
+              </span>
             </span>
             <span className="pick-arrow" aria-hidden="true">
               ›

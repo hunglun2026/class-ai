@@ -11,6 +11,9 @@ export interface Env {
   GEMINI_API_KEY: string;
   SESSION_SECRET: string; // 簽 cookie 用
   APP_VERSION: string;
+  // AI 評分用量上限（每位老師）：不設就用 usage.ts 的預設（每天 200、每分鐘 20）
+  DAILY_AI_LIMIT?: string;
+  MINUTE_AI_LIMIT?: string;
 }
 
 export interface Variables {

@@ -8,15 +8,35 @@ export class ApiError extends Error {
   }
 }
 
+const NETWORK_ERROR = "連不上伺服器，請檢查網路後再試一次";
+
+// 登入過期（session 14 天、Google 授權過期）：通知 App 統一跳回登入頁，不讓每一頁各自只顯示一行字
+export const AUTH_LOST_EVENT = "classai:auth-lost";
+function checkAuthLost(status: number, code?: string, message?: string) {
+  if (status === 401 && (code === "not_logged_in" || code === "auth_expired")) {
+    window.dispatchEvent(new CustomEvent(AUTH_LOST_EVENT, { detail: message }));
+  }
+}
+
+async function send(path: string, options: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${API_BASE}${path}`, { ...options, credentials: "include" });
+  } catch {
+    // fetch 本身丟錯＝根本沒連上（斷網、伺服器掛了），瀏覽器給的是英文 Failed to fetch
+    throw new ApiError(NETWORK_ERROR, "network");
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await send(path, {
     ...options,
-    credentials: "include",
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.error ?? `請求失敗（${res.status}）`, body.code);
+    const message = body.error ?? `請求失敗（${res.status}），請稍後再試`;
+    checkAuthLost(res.status, body.code, message);
+    throw new ApiError(message, body.code);
   }
   return res.json();
 }
@@ -27,10 +47,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
  * 登入 cookie，失敗時老師還會被丟到一頁純 JSON 錯誤訊息。
  */
 async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
+  const res = await send(path, {});
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `下載失敗（${res.status}）`);
+    const message = body.error ?? `下載失敗（${res.status}），請稍後再試`;
+    checkAuthLost(res.status, body.code, message);
+    throw new ApiError(message, body.code);
   }
 
   const blob = await res.blob();
@@ -59,7 +81,9 @@ export const api = {
   me: () => request<{ teacher: { id: string; email: string; name: string; picture?: string } | null }>("/api/auth/me"),
   logout: () => request("/api/auth/logout", { method: "POST" }),
 
-  courses: () => request<{ courses: { id: string; name: string; section?: string }[] }>("/api/courses"),
+  // teacherCount：這門課在 classAI 裡有幾位老師（協同教學時 > 1，批改頁會提醒分數是共用的）
+  courses: () =>
+    request<{ courses: { id: string; name: string; section?: string; teacherCount?: number }[] }>("/api/courses"),
   courseWork: (courseId: string) =>
     request<{
       courseWork: {
@@ -72,7 +96,11 @@ export const api = {
       }[];
     }>(`/api/courses/${courseId}/coursework`),
 
-  getRubric: (courseWorkId: string) => request<{ rubric: any | null }>(`/api/rubrics/${courseWorkId}`),
+  // courseworkMaxPoints／gradedCount／maxGivenScore：評分標準頁的防呆提醒用（總分跟 Classroom 不同、已經有人評過分）
+  getRubric: (courseWorkId: string) =>
+    request<{ rubric: any | null; courseworkMaxPoints: number | null; gradedCount: number; maxGivenScore: number | null }>(
+      `/api/rubrics/${courseWorkId}`
+    ),
   saveRubric: (body: object) => request<{ id: string }>("/api/rubrics", { method: "POST", body: JSON.stringify(body) }),
 
   // 重的：真的去打 Classroom API 拉最新繳交＋全班名冊，只在老師按「拉取最新繳交」時呼叫
@@ -81,12 +109,16 @@ export const api = {
   // 輕的：只讀 D1 快取，評分完刷新畫面用這支，不要每評一個人就整班重拉一次
   listSubmissions: (courseWorkId: string) =>
     request<{ submissions: any[] }>(`/api/submissions/${courseWorkId}`),
-  aiGrade: (submissionId: string) =>
+  // force：老師改過的分數/評語，確認過要讓 AI 蓋掉才帶（不帶時後端回 code "overwrite_teacher_edit"）
+  aiGrade: (submissionId: string, force = false) =>
     request<{
       grade: { score: number; feedback: string; itemScores?: { item: string; score: number; comment: string }[] };
       model: string;
       confidenceFlags: string[];
-    }>(`/api/submissions/${submissionId}/ai-grade`, { method: "POST" }),
+      remainingToday: number;
+    }>(`/api/submissions/${submissionId}/ai-grade${force ? "?force=1" : ""}`, { method: "POST" }),
+  // 今天還可以讓 AI 評幾份（每位老師各自計算）
+  usage: () => request<{ usedToday: number; dailyLimit: number; remainingToday: number }>("/api/usage"),
   downloadExport: (courseWorkId: string) =>
     downloadFile(`/api/submissions/${courseWorkId}/export.xlsx`, "成績表.xlsx"),
   updateGrade:(submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>

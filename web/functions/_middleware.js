@@ -10,6 +10,11 @@ export async function onRequest(context) {
   const expected = env.SITE_PASSWORD;
   if (!expected) return next();
 
+  // /api/* 不經過密碼閘：那是給程式呼叫的，而且 Google 登入完會直接導回
+  // /api/auth/google/callback，那個請求不會帶密碼 cookie，擋下來登入就壞了。
+  // 這些路徑本來就要 Google 登入才拿得到資料（只有 /health 與 /api/auth/* 是公開的）
+  if (new URL(request.url).pathname.startsWith("/api/")) return next();
+
   const cookies = request.headers.get("Cookie") || "";
   const authed = cookies.split(";").some((c) => {
     const i = c.indexOf("=");

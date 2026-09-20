@@ -27,13 +27,12 @@ export function readCookie(cookieHeader: string | null, name: string): string | 
   return undefined;
 }
 
-// 前端（class-ai.pages.dev）跟後端 API（class-ai-worker.hunglun2026.workers.dev）是不同網域，
-// 前端用 fetch 帶這個 cookie 屬於跨網域請求，SameSite=Lax 會被瀏覽器擋掉不送出，
-// 導致登入完成後前端讀不到已登入狀態、被導回登入頁循環。正式環境要用 SameSite=None
-// （瀏覽器規定 SameSite=None 一定要搭配 Secure，本機 http 開發環境沒有 https 用不了，維持 Lax 即可，
-// 反正本機前後端都是 localhost，屬於同一個 site，Lax 不會擋）。
+// 2026-09-20 起前端與 API 都在 classai.hunglun.com（Pages 把 /api/* 轉給這支 Worker），
+// cookie 屬於第一方，用 SameSite=Lax 就夠，而且 Lax 本身擋掉大部分 CSRF。
+// （在此之前是跨網域，只能用 SameSite=None，Safari 預設會整個擋掉第三方 cookie，iPad 就登不進去。）
+// 正式環境一定要 Secure；本機 http 沒有 https，只能不加。
 function sessionCookieAttrs(env: Env): string {
-  return env.ENVIRONMENT === "production" ? "SameSite=None; Secure" : "SameSite=Lax";
+  return env.ENVIRONMENT === "production" ? "SameSite=Lax; Secure" : "SameSite=Lax";
 }
 
 export function sessionCookieHeader(env: Env, sessionId: string): string {

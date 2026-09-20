@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import Stepper from "../components/Stepper";
+import SafeLink from "../components/SafeLink";
+import { setPending } from "../unsaved";
 import { TEMPLATES, splitPoints } from "../templates";
 
 export type Mode = "freetext" | "rubric" | "answer_key";
@@ -10,6 +12,7 @@ export interface AssignmentState {
   title?: string;
   maxPoints?: number;
   courseName?: string;
+  teacherCount?: number; // 這門課有幾位老師（協同教學時 > 1）
 }
 
 interface RubricItem {
@@ -34,6 +37,28 @@ export const MODE_LABEL: Record<Mode, string> = {
 };
 
 const MAX_ANSWER_KEY_FILE_BYTES = 8 * 1024 * 1024;
+const TEMPLATE_NAME_MAX = 60;
+
+// 看副檔名決定檔案類型：有些電腦選 Excel 時瀏覽器給的類型是空字串，照 file.type 會被後端當成不支援
+const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+};
+
+function fileProblem(file: File): string | null {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (file.size === 0) return "這個檔案是空的，請重新選一次";
+  if (file.size > MAX_ANSWER_KEY_FILE_BYTES) return "檔案太大，請控制在 8MB 以內（照片可以用手機截圖縮小）";
+  if (ext === "doc" || ext === "docx") return "Word 檔不能直接上傳，請在 Word 裡「另存新檔」成 PDF 再上傳，或把答案貼到上面的文字框";
+  if (ext === "heic" || ext === "heif") return "iPhone 的 HEIC 照片不能上傳，請改傳截圖，或到「設定 → 相機 → 格式」改成「最相容」再拍";
+  if (!EXT_MIME[ext]) return "只能上傳照片（JPG、PNG）、PDF 或 Excel 檔";
+  return null;
+}
 const ANSWER_KEY_FILE_ACCEPT =
   "image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.xlsx,.xls";
 
@@ -52,24 +77,36 @@ export default function RubricSetup() {
   const navigate = useNavigate();
   const assignment = (location.state as AssignmentState | null) ?? null;
   const [initial, setInitial] = useState<any>(undefined);
+  const [stats, setStats] = useState<{ courseworkMaxPoints: number | null; gradedCount: number; maxGivenScore: number | null }>({
+    courseworkMaxPoints: null,
+    gradedCount: 0,
+    maxGivenScore: null,
+  });
   const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!courseWorkId) return;
+    setLoadError("");
     api
       .getRubric(courseWorkId)
-      .then((r) => setInitial(r.rubric))
+      .then((r) => {
+        setStats({ courseworkMaxPoints: r.courseworkMaxPoints, gradedCount: r.gradedCount, maxGivenScore: r.maxGivenScore });
+        setInitial(r.rubric);
+      })
       .catch((e) => setLoadError(e.message));
-  }, [courseWorkId]);
+  }, [courseWorkId, reloadKey]);
+  // 重新整理頁面時 location.state 會不見，總分改用後端存的 Classroom 滿分
+  const classroomMax = assignment?.maxPoints ?? stats.courseworkMaxPoints ?? undefined;
 
   const gradingPath = `/courses/${courseId}/coursework/${courseWorkId}`;
 
   return (
     <div>
       <Stepper current={2} />
-      <Link to={`/courses/${courseId}`} state={{ courseName: assignment?.courseName }} className="back-link">
+      <SafeLink to={`/courses/${courseId}`} state={{ courseName: assignment?.courseName }} className="back-link">
         ← 上一步：換一份作業
-      </Link>
+      </SafeLink>
       <div className="page-head">
         <div className="eyebrow">第 3 步</div>
         <h1 className="page-title">這份作業要怎麼評分？</h1>
@@ -81,12 +118,22 @@ export default function RubricSetup() {
         )}
       </div>
 
-      {loadError && <p className="error-text">{loadError}</p>}
+      {loadError && (
+        <div className="error-text error-box" role="alert">
+          <span>{loadError}</span>
+          <button className="secondary small" onClick={() => setReloadKey((k) => k + 1)}>
+            再試一次
+          </button>
+        </div>
+      )}
       {initial === undefined && !loadError && <p className="muted">載入中…</p>}
       {initial !== undefined && courseWorkId && (
         <RubricForm
           courseWorkId={courseWorkId}
-          defaultMaxPoints={assignment?.maxPoints}
+          defaultMaxPoints={classroomMax}
+          classroomMax={classroomMax}
+          gradedCount={initial ? stats.gradedCount : 0}
+          maxGivenScore={stats.maxGivenScore}
           initial={initial}
           onSaved={() => navigate(gradingPath, { state: assignment, replace: true })}
         />
@@ -98,11 +145,17 @@ export default function RubricSetup() {
 function RubricForm({
   courseWorkId,
   defaultMaxPoints,
+  classroomMax,
+  gradedCount,
+  maxGivenScore,
   initial,
   onSaved,
 }: {
   courseWorkId: string;
   defaultMaxPoints?: number;
+  classroomMax?: number;
+  gradedCount: number;
+  maxGivenScore: number | null;
   initial: any;
   onSaved: () => void;
 }) {
@@ -138,14 +191,57 @@ function RubricForm({
   const filledItems = items.filter((it) => it.item.trim());
   // 加總算畫面上每一列（包含還沒取名的），老師看到的數字才跟輸入框對得起來
   const subtotal = items.reduce((a, it) => a + (Number(it.maxPoints) || 0), 0);
-  const rubricMismatch = mode === "rubric" && subtotal !== maxPoints;
+  const rubricMismatch = mode === "rubric" && Math.abs(subtotal - maxPoints) > 1e-6;
   const rubricEmpty = mode === "rubric" && filledItems.length !== items.length;
   const answerEmpty = mode === "answer_key" && !answerKey.trim() && !newFile && (!existingFile || fileRemoved);
-  const canSave = !saving && maxPoints > 0 && !rubricMismatch && !rubricEmpty && !answerEmpty;
+
+  // 總分：清空會變成 0（Number("")），以前按鈕變灰卻沒說為什麼
+  const totalError = !Number.isFinite(maxPoints) || maxPoints <= 0
+    ? "總分要填大於 0 的數字"
+    : maxPoints > 1000
+      ? "總分最多 1000 分"
+      : "";
+  // 量表每一列的問題：配分不是正數、名稱重複（名稱空白另外由 rubricEmpty 提示）
+  const itemProblems: string[] = [];
+  if (mode === "rubric") {
+    const badPoints = items.map((it, i) => (!Number.isFinite(Number(it.maxPoints)) || Number(it.maxPoints) <= 0 ? i + 1 : 0)).filter(Boolean);
+    if (badPoints.length) itemProblems.push(`第 ${badPoints.join("、")} 項的配分要大於 0`);
+    const seen = new Map<string, number[]>();
+    items.forEach((it, i) => {
+      const k = it.item.trim();
+      if (k) seen.set(k, [...(seen.get(k) ?? []), i + 1]);
+    });
+    const dups = [...seen.values()].filter((rows) => rows.length > 1);
+    if (dups.length) itemProblems.push(`第 ${dups.map((r) => r.join("、")).join("；")} 項的名稱重複了，AI 會分不清楚`);
+  }
+  const canSave = !saving && !totalError && !itemProblems.length && !rubricMismatch && !rubricEmpty && !answerEmpty;
+
+  // 不擋，但要讓老師知道的事
+  const classroomMismatch = classroomMax != null && !totalError && classroomMax !== maxPoints;
+  const lowerThanGiven = maxGivenScore != null && !totalError && maxPoints < maxGivenScore;
+
+  // 還沒存的修改：跟一進頁面時的內容比，有差就登記，換頁或關分頁前會問
+  const snapshot = JSON.stringify({ mode, instructions, answerKey, maxPoints, items, f: newFile?.name ?? null, fileRemoved });
+  const initialSnapshot = useRef(snapshot);
+  const dirty = snapshot !== initialSnapshot.current;
+  useEffect(() => {
+    setPending("rubric", dirty);
+    return () => setPending("rubric", false);
+  }, [dirty]);
+
+  // 套用範本會蓋掉老師寫好的內容：有寫東西才問，空白或預設內容直接套
+  function confirmOverwriteContent(): boolean {
+    const hasContent =
+      (instructions.trim() && instructions !== DEFAULT_INSTRUCTIONS) ||
+      items.some((it) => it.item.trim()) ||
+      answerKey.trim();
+    return !hasContent || window.confirm("套用範本會取代你目前寫的評分內容，確定要套用嗎？");
+  }
 
   function applyTemplate(key: string) {
     const t = TEMPLATES.find((x) => x.key === key);
     if (!t) return;
+    if (!confirmOverwriteContent()) return;
     setInstructions(t.instructions);
     const pts = splitPoints(
       t.items.map((i) => i.weight),
@@ -157,6 +253,7 @@ function RubricForm({
 
   async function applyMyTemplate(id: string) {
     setTemplateError("");
+    if (!confirmOverwriteContent()) return;
     try {
       const { template: t } = await api.getRubricTemplate(id);
       setMode(t.mode);
@@ -178,8 +275,12 @@ function RubricForm({
   }
 
   async function saveAsTemplate() {
-    const name = window.prompt("這個範本要取什麼名字？（例如：國一作文評分標準）")?.trim();
+    const name = window.prompt(`這個範本要取什麼名字？（例如：國一作文評分標準，最多 ${TEMPLATE_NAME_MAX} 個字）`)?.trim();
     if (!name) return;
+    if (name.length > TEMPLATE_NAME_MAX) {
+      setTemplateError(`範本名稱最多 ${TEMPLATE_NAME_MAX} 個字，請取短一點`);
+      return;
+    }
     setTemplateBusy(true);
     setTemplateError("");
     try {
@@ -224,19 +325,29 @@ function RubricForm({
     setItems(items.map((it, i) => ({ ...it, maxPoints: pts[i] })));
   }
 
-  async function handleFilePick(file: File | undefined) {
+  async function handleFilePick(input: HTMLInputElement) {
     setFileError("");
+    const file = input.files?.[0];
+    // 清掉選取紀錄：選錯檔之後再選同一個檔案也能觸發（不然 onChange 不會再跑）
+    input.value = "";
     if (!file) return;
-    if (file.size > MAX_ANSWER_KEY_FILE_BYTES) {
-      setFileError("檔案太大，請控制在 8MB 以內");
+    const problem = fileProblem(file);
+    if (problem) {
+      setFileError(problem);
       return;
     }
-    const base64 = await readFileAsBase64(file);
-    setNewFile({ name: file.name, mimeType: file.type, base64 });
-    setFileRemoved(false);
+    try {
+      const base64 = await readFileAsBase64(file);
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      setNewFile({ name: file.name, mimeType: EXT_MIME[ext], base64 });
+      setFileRemoved(false);
+    } catch {
+      setFileError("讀不到這個檔案，請重新選一次");
+    }
   }
 
   async function save() {
+    if (!canSave) return;
     setSaving(true);
     setSaveError("");
     try {
@@ -250,6 +361,9 @@ function RubricForm({
       }
       if (mode === "rubric") body.rubricItems = filledItems;
       await api.saveRubric(body);
+      // 存好了就不算「沒存的修改」，接下來自動換頁不用再問
+      setPending("rubric", false);
+      initialSnapshot.current = snapshot;
       onSaved();
     } catch (e) {
       setSaveError(`沒有存成功：${(e as Error).message}`);
@@ -326,6 +440,22 @@ function RubricForm({
         />
         <span className="muted">分</span>
       </div>
+      {totalError && <p className="error-text" role="alert">{totalError}</p>}
+      {classroomMismatch && (
+        <p className="warn-text">
+          Classroom 這份作業的滿分是 {classroomMax} 分，這裡設 {maxPoints} 分。分數貼回 Classroom 時會對不上，確定不一樣再存。
+        </p>
+      )}
+      {gradedCount > 0 && (
+        <p className="warn-text">
+          這份作業已經有 {gradedCount} 位評過分了。改評分標準不會自動重評，要重評請到批改頁對那幾位按「請 AI 重評」。
+        </p>
+      )}
+      {lowerThanGiven && (
+        <p className="error-text" role="alert">
+          注意：有學生目前是 {maxGivenScore} 分，比新的總分 {maxPoints} 分還高。存了之後，那些學生的分數要自己重新調整。
+        </p>
+      )}
 
       <h2 className="form-step">
         <span className="section-index">2</span>
@@ -397,6 +527,11 @@ function RubricForm({
               </button>
             </div>
           ))}
+          {itemProblems.map((p) => (
+            <p key={p} className="error-text" role="alert">
+              {p}
+            </p>
+          ))}
           <div className={`subtotal ${rubricMismatch ? "bad" : "good"}`}>
             各項加起來 {subtotal} 分／總分 {maxPoints} 分
             {rubricMismatch && `（${subtotal > maxPoints ? "多了" : "還差"} ${Math.abs(maxPoints - subtotal)} 分）`}
@@ -432,7 +567,7 @@ function RubricForm({
               id="answerKeyFile"
               type="file"
               accept={ANSWER_KEY_FILE_ACCEPT}
-              onChange={(e) => handleFilePick(e.target.files?.[0])}
+              onChange={(e) => handleFilePick(e.currentTarget)}
             />
           </label>
           {fileError && <p className="error-text">{fileError}</p>}
@@ -454,7 +589,11 @@ function RubricForm({
           {saving ? "儲存中…" : "儲存，開始批改"}
         </button>
         <span className="muted">
-          {rubricEmpty
+          {totalError
+            ? totalError
+            : itemProblems.length
+              ? "量表有項目要修正，看上面紅字"
+              : rubricEmpty
             ? "每個項目都要填名稱（用不到的列按 ✕ 刪掉），或直接套用上面的範本"
             : rubricMismatch
               ? "各項配分加起來要等於總分才能儲存"

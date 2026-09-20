@@ -520,3 +520,11 @@ textarea:focus, input:focus, select:focus {
   .hint-line { display: none; }
 }
 .app-version { text-align: center; font-size: 13px; color: var(--ink-soft); padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.attachment-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.attachment-list a, .attachment-list span { display: inline-block; padding: 8px 10px; min-height: 40px; box-sizing: border-box; border-radius: 8px; background: var(--brand-soft); overflow-wrap: anywhere; font-size: 15px; }
+.attachment-list a { color: var(--brand); text-decoration: none; }
+.attachment-list a:hover { text-decoration: underline; }
+.login-notice { max-width: 440px; margin: 0 auto 16px; padding: 12px 14px; border-radius: 10px; background: var(--st-fail-bg); color: var(--st-fail); font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.login-notice a { color: var(--brand); }
+.error-box { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.warn-text { margin: 6px 0; padding: 8px 12px; border-radius: 10px; background: var(--st-review-bg); color: #7c4a03; font-size: 15px; overflow-wrap: anywhere; }

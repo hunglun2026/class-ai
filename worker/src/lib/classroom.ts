@@ -1,11 +1,18 @@
 const BASE = "https://classroom.googleapis.com/v1";
 
+// 帶狀態碼的錯誤：全域錯誤處理（index.ts）依狀態碼換成老師看得懂的說明，原始內容只進 log
+export class ClassroomError extends Error {
+  constructor(public status: number, detail: string) {
+    super(detail);
+  }
+}
+
 async function callClassroom<T>(accessToken: string, path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) {
-    throw new Error(`Classroom API ${path} 回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+    throw new ClassroomError(res.status, `Classroom API ${path} 回 ${res.status}：${(await res.text()).slice(0, 300)}`);
   }
   return res.json();
 }
@@ -69,6 +76,22 @@ export interface ClassroomSubmission {
   state: string; // NEW / CREATED / TURNED_IN / RETURNED / RECLAIMED_BY_STUDENT
   assignmentSubmission?: { attachments?: ClassroomAttachment[] };
   shortAnswerSubmission?: { answer?: string };
+  // Classroom「選擇題」題型的作答（只有一個選項文字）
+  multipleChoiceSubmission?: { answer?: string };
+  // 繳交／退回等狀態變化紀錄，用來算「最後一次繳交時間」判斷有沒有重交
+  submissionHistory?: { stateHistory?: { state?: string; stateTimestamp?: string } }[];
+}
+
+// 最後一次 TURNED_IN 的時間（unix 秒）；沒有紀錄回 null
+export function lastTurnedInAt(sub: ClassroomSubmission): number | null {
+  let latest: number | null = null;
+  for (const h of sub.submissionHistory ?? []) {
+    const st = h.stateHistory;
+    if (st?.state !== "TURNED_IN" || !st.stateTimestamp) continue;
+    const t = Math.floor(Date.parse(st.stateTimestamp) / 1000);
+    if (Number.isFinite(t) && (latest === null || t > latest)) latest = t;
+  }
+  return latest;
 }
 
 export async function listStudentSubmissions(

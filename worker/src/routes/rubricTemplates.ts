@@ -7,18 +7,18 @@ export const rubricTemplateRoutes = new Hono<{ Bindings: Env; Variables: Variabl
 rubricTemplateRoutes.use("*", requireAuth);
 
 const rubricItemSchema = z.object({
-  item: z.string(),
-  maxPoints: z.number(),
-  description: z.string().optional(),
+  item: z.string().max(100),
+  maxPoints: z.number().finite().min(0),
+  description: z.string().max(1000).optional(),
 });
 
 const createSchema = z.object({
   name: z.string().min(1).max(60),
   mode: z.enum(["freetext", "rubric", "answer_key"]),
-  instructions: z.string().optional(),
-  rubricItems: z.array(rubricItemSchema).optional(),
-  answerKey: z.string().optional(),
-  maxPoints: z.number().default(100),
+  instructions: z.string().max(5000).optional(),
+  rubricItems: z.array(rubricItemSchema).max(30).optional(),
+  answerKey: z.string().max(20000).optional(),
+  maxPoints: z.number().finite().positive().max(1000).default(100),
 });
 
 // 老師自己存的常用評分標準，清單只回輕量欄位（不含instructions/rubric_json/answer_key

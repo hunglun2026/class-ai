@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import Stepper from "../components/Stepper";
+import SafeLink from "../components/SafeLink";
+import { setPending } from "../unsaved";
 import { MODE_LABEL, type AssignmentState, type Mode } from "./RubricSetup";
 
 interface Submission {
@@ -19,6 +21,47 @@ interface Submission {
   ai_raw_json: string | null;
   locked: number | null;
   confidence_flags: string | null;
+  attachments_json: string | null;
+  turned_in_at: number | null; // 學生最後一次繳交時間（unix 秒）
+  grade_updated_at: number | null; // 分數最後一次變動時間
+}
+
+// 學生在老師評分之後又重交：分數是針對舊版本的，要提醒老師重看
+function isResubmitted(s: Submission): boolean {
+  return !!s.status && s.turned_in_at != null && s.grade_updated_at != null && s.turned_in_at > s.grade_updated_at;
+}
+
+interface AttachmentLink {
+  name: string;
+  href: string | null; // null＝網址不安全或沒有，只顯示名稱不做成連結
+}
+
+// 只放行 http/https：學生交的連結網址是學生自己填的，javascript: 之類做成連結，老師一點就會執行（XSS）
+function safeHttpUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseAttachments(raw: string | null): AttachmentLink[] {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list.map((a: { name?: string; url?: string; driveFileId?: string }) => ({
+      name: a.name || "未命名檔案",
+      // 雲端硬碟檔案：同步時存的原檔連結；舊資料沒存連結就用檔案 ID 組
+      href:
+        safeHttpUrl(a.url) ??
+        (a.driveFileId ? `https://drive.google.com/file/d/${encodeURIComponent(a.driveFileId)}/view` : null),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function parseConfidenceFlags(raw: string | null): string[] {
@@ -31,7 +74,7 @@ function parseConfidenceFlags(raw: string | null): string[] {
   }
 }
 
-type Filter = "all" | "todo" | "review" | "done" | "failed";
+type Filter = "all" | "todo" | "review" | "done" | "failed" | "resubmitted";
 
 const BATCH_CONCURRENCY = 3;
 
@@ -64,9 +107,17 @@ export default function Grading() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // 今天還能讓 AI 評幾份（所有老師共用一把 AI 金鑰，每人每天有上限）
+  const [remaining, setRemaining] = useState<number | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const setupPath = `/courses/${courseId}/coursework/${courseWorkId}/setup`;
+
+  // AI 批次評分進行中關分頁或換頁，剩下的學生就不會評了，先問一聲
+  useEffect(() => {
+    setPending("batch", !!batch);
+    return () => setPending("batch", false);
+  }, [batch]);
 
   useEffect(() => {
     if (!courseWorkId) return;
@@ -88,6 +139,13 @@ export default function Grading() {
       .catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseWorkId]);
+
+  useEffect(() => {
+    api
+      .usage()
+      .then((u) => setRemaining(u.remainingToday))
+      .catch(() => setRemaining(null)); // 讀不到就不顯示，不擋老師做事
+  }, []);
 
   async function refreshSubmissions() {
     if (!courseWorkId) return;
@@ -131,10 +189,18 @@ export default function Grading() {
     });
   }
 
-  async function gradeOne(s: Submission) {
+  function clearFailure(id: string) {
+    setFailures((prev) => {
+      const { [id]: _, ...rest } = prev;
+      return rest;
+    });
+  }
+
+  async function gradeOne(s: Submission, force = false) {
     markBusy(s.id, true);
     try {
-      const { grade, model, confidenceFlags } = await api.aiGrade(s.id);
+      const { grade, model, confidenceFlags, remainingToday } = await api.aiGrade(s.id, force);
+      setRemaining(remainingToday);
       // 後端已經回傳這位學生的完整結果，直接合併進本地狀態就好，不用整班重拉一次
       // （跟後端 ai-grade 路由的 UPSERT 邏輯對齊：final_score/final_feedback 初始值＝AI 建議值）
       setSubmissions((prev) =>
@@ -155,10 +221,7 @@ export default function Grading() {
             : row
         )
       );
-      setFailures((prev) => {
-        const { [s.id]: _, ...rest } = prev;
-        return rest;
-      });
+      clearFailure(s.id);
     } catch (e) {
       setFailures((prev) => ({ ...prev, [s.id]: (e as Error).message }));
     } finally {
@@ -169,6 +232,14 @@ export default function Grading() {
   // 同時最多評 3 位；每評完一位就刷新，結果一個一個出現，不用等全班跑完
   async function gradeMany(list: Submission[]) {
     if (!list.length) return;
+    if (remaining !== null && list.length > remaining) {
+      const ok = window.confirm(
+        remaining === 0
+          ? "今天的 AI 評分次數已經用完，明天會重置。你還是可以用「自己打分」繼續批改。"
+          : `今天只剩 ${remaining} 次 AI 評分，這次要評 ${list.length} 位，會先評前 ${remaining} 位，剩下的要等明天或自己打分。要繼續嗎？`
+      );
+      if (!ok || remaining === 0) return;
+    }
     const queue = [...list];
     let done = 0;
     setBatch({ done: 0, total: list.length });
@@ -195,6 +266,7 @@ export default function Grading() {
       review: list.filter((s) => s.status === "ai_suggested" || s.status === "teacher_edited").length,
       done: list.filter((s) => s.status === "confirmed").length,
       failed: list.filter((s) => failures[s.id]).length,
+      resubmitted: list.filter(isResubmitted).length,
     }),
     [list, failures]
   );
@@ -206,6 +278,7 @@ export default function Grading() {
     if (filter === "review") return s.status === "ai_suggested" || s.status === "teacher_edited";
     if (filter === "done") return s.status === "confirmed";
     if (filter === "failed") return !!failures[s.id];
+    if (filter === "resubmitted") return isResubmitted(s);
     return true;
   });
 
@@ -242,14 +315,15 @@ export default function Grading() {
     { key: "review", label: "等你確認", n: counts.review },
     { key: "done", label: "已完成", n: counts.done },
     ...(counts.failed ? [{ key: "failed" as Filter, label: "評分失敗", n: counts.failed }] : []),
+    ...(counts.resubmitted ? [{ key: "resubmitted" as Filter, label: "學生重交", n: counts.resubmitted }] : []),
   ];
 
   return (
     <div>
       <Stepper current={3} />
-      <Link to={`/courses/${courseId}`} state={{ courseName: assignment?.courseName }} className="back-link">
+      <SafeLink to={`/courses/${courseId}`} state={{ courseName: assignment?.courseName }} className="back-link">
         ← 上一步：換一份作業
-      </Link>
+      </SafeLink>
 
       <div className="page-head">
         <div className="eyebrow">第 4 步</div>
@@ -264,15 +338,21 @@ export default function Grading() {
             <span className="muted">（總分 {maxPoints} 分）</span>
             {rubric.answerKeyFile && <span className="muted">｜答案檔：{rubric.answerKeyFile.name}</span>}
           </div>
-          <Link to={setupPath} state={assignment} className="link-btn">
+          <SafeLink to={setupPath} state={assignment} className="link-btn">
             修改評分標準
-          </Link>
+          </SafeLink>
         </div>
       )}
 
       <p className="trust-note">
         AI 給的分數和評語只是草稿，不會寫回 Google Classroom；要看過、按「完成批改」才算數。
       </p>
+
+      {(assignment?.teacherCount ?? 1) > 1 && (
+        <p className="trust-note">
+          這門課有 {assignment?.teacherCount} 位老師，分數和評語是大家共用的：你改的其他老師看得到，別人改的你重新整理也會看到。
+        </p>
+      )}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -287,7 +367,11 @@ export default function Grading() {
         </div>
         <div className="row toolbar-actions">
           {ungraded.length > 0 && (
-            <button onClick={() => gradeMany(ungraded)} disabled={!!batch || !rubric}>
+            <button
+              onClick={() => gradeMany(ungraded)}
+              disabled={!!batch || !rubric || remaining === 0}
+              title={remaining === 0 ? "今天的 AI 評分次數已經用完，明天會重置" : undefined}
+            >
               讓 AI 評分還沒評的 {ungraded.length} 位
             </button>
           )}
@@ -305,6 +389,13 @@ export default function Grading() {
             </button>
           )}
         </div>
+        {remaining !== null && (
+          <p className={`small-text ${remaining === 0 ? "warn-text" : "muted"}`}>
+            {remaining === 0
+              ? "今天的 AI 評分次數已經用完，明天會重置。還是可以用每位學生卡片上的「自己打分」繼續批改。"
+              : `今天還可以讓 AI 評 ${remaining} 份（每位老師每天都有上限，避免一個人把大家共用的 AI 額度用光）。`}
+          </p>
+        )}
         {batch && (
           <div className="batch-note" role="status">
             AI 正在評第 {Math.min(batch.done + 1, batch.total)}／{batch.total} 位。全部大約要 1～3
@@ -312,6 +403,15 @@ export default function Grading() {
           </div>
         )}
       </div>
+
+      {counts.resubmitted > 0 && filter !== "resubmitted" && (
+        <div className="warn-text error-box" role="status">
+          <span>有 {counts.resubmitted} 位學生在你評分之後又重新交了作業，分數是針對舊版本的。</span>
+          <button className="secondary small" onClick={() => setFilter("resubmitted")}>
+            只看這幾位
+          </button>
+        </div>
+      )}
 
       {allDone && (
         <div className="done-banner">
@@ -359,8 +459,12 @@ export default function Grading() {
           position={`${i + 1}／${visible.length}`}
           onPrev={i > 0 ? () => goTo(visible[i - 1].id) : undefined}
           onNext={i < visible.length - 1 ? () => goTo(visible[i + 1].id) : undefined}
-          onAiGrade={() => gradeOne(s)}
-          onSaved={refreshSubmissions}
+          onAiGrade={(force) => gradeOne(s, force)}
+          onSaved={async () => {
+            // 老師自己打過分就不再算「評分失敗」，免得按「只重評失敗的」時 AI 把老師的分數蓋掉
+            clearFailure(s.id);
+            await refreshSubmissions();
+          }}
           onConfirmed={() => goNextUnfinished(s.id)}
         />
       ))}
@@ -399,12 +503,20 @@ function SubmissionCard({
   position: string;
   onPrev?: () => void;
   onNext?: () => void;
-  onAiGrade: () => void;
+  onAiGrade: (force: boolean) => void;
   onSaved: () => Promise<void> | void;
   onConfirmed: () => void;
 }) {
-  const [score, setScore] = useState(submission.final_score ?? submission.ai_score ?? 0);
-  const [feedback, setFeedback] = useState(submission.final_feedback ?? submission.ai_feedback ?? "");
+  // 分數用文字存：輸入框清空時 Number("") 會變成 0，老師以為沒填、其實存成 0 分
+  const savedScore = submission.final_score ?? submission.ai_score;
+  const savedScoreText = savedScore != null ? String(savedScore) : "";
+  const savedFeedback = submission.final_feedback ?? submission.ai_feedback ?? "";
+  const [scoreText, setScoreText] = useState(savedScoreText);
+  const [feedback, setFeedback] = useState(savedFeedback);
+  const [manual, setManual] = useState(false);
+  const [triedSave, setTriedSave] = useState(false);
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const scoreInputRef = useRef<HTMLInputElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -420,13 +532,35 @@ function SubmissionCard({
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
-    setScore(submission.final_score ?? submission.ai_score ?? 0);
-    setFeedback(submission.final_feedback ?? submission.ai_feedback ?? "");
-  }, [submission.final_score, submission.ai_score, submission.final_feedback, submission.ai_feedback]);
+    setScoreText(savedScoreText);
+    setFeedback(savedFeedback);
+  }, [savedScoreText, savedFeedback]);
+
+  const scoreNum = Number(scoreText);
+  const scoreError =
+    scoreText.trim() === ""
+      ? `請填分數（0～${maxPoints} 分）`
+      : !Number.isFinite(scoreNum)
+        ? "分數只能填數字"
+        : scoreNum < 0 || scoreNum > maxPoints
+          ? `分數要在 0 到 ${maxPoints} 分之間`
+          : "";
+  const editorOpen = !!submission.status || manual;
+  const hasAi = submission.ai_score != null;
+  const dirty = editorOpen && (scoreText !== savedScoreText || feedback !== savedFeedback);
+
+  // 改了還沒存：登記起來，關分頁、重新整理、按上一步都會先問一聲，不讓老師的修改默默消失
+  useEffect(() => {
+    const key = `card:${submission.id}`;
+    setPending(key, dirty);
+    return () => setPending(key, false);
+  }, [dirty, submission.id]);
+  const resubmitted = isResubmitted(submission);
 
   const confirmed = submission.status === "confirmed";
   const locked = submission.locked === 1;
   const itemScores = parseItemScores(submission.ai_raw_json);
+  const attachments = parseAttachments(submission.attachments_json);
   const confidenceFlags = parseConfidenceFlags(submission.confidence_flags);
   const longText = (submission.content_text?.length ?? 0) > 220;
 
@@ -461,11 +595,31 @@ function SubmissionCard({
     }
   }
 
+  // 會蓋掉老師改過的內容（或還沒存的字）時，第一次按只提醒，第二次按才真的請 AI 重評
+  function requestAi() {
+    const wouldOverwrite = submission.status === "teacher_edited" || dirty;
+    if (wouldOverwrite && !confirmOverwrite) {
+      setConfirmOverwrite(true);
+      return;
+    }
+    setConfirmOverwrite(false);
+    onAiGrade(submission.status === "teacher_edited");
+  }
+
   async function save(confirm: boolean) {
+    if (saving) return;
+    if (scoreError) {
+      // 分數有問題不送出：把游標放回分數欄，錯誤訊息就在旁邊
+      setTriedSave(true);
+      scoreInputRef.current?.focus();
+      return;
+    }
     setSaving(true);
     setSaveError("");
     try {
-      await api.updateGrade(submission.id, { finalScore: score, finalFeedback: feedback, confirm });
+      await api.updateGrade(submission.id, { finalScore: scoreNum, finalFeedback: feedback, confirm });
+      setTriedSave(false);
+      setManual(false);
       await onSaved();
       if (confirm) {
         setExpanded(false);
@@ -479,7 +633,7 @@ function SubmissionCard({
   }
 
   async function copy() {
-    const text = `分數：${score} ／ ${maxPoints}\n${feedback}`;
+    const text = `分數：${scoreText} ／ ${maxPoints}\n${feedback}`;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -517,8 +671,9 @@ function SubmissionCard({
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
           <strong className="student-name">{submission.student_name}</strong>
           <span className="score-pill">
-            {score} ／ {maxPoints}
+            {savedScoreText} ／ {maxPoints}
           </span>
+          {resubmitted && <span className="badge review">學生重交了，請展開重看</span>}
           <button className="secondary small" onClick={copy}>
             {copied ? "已複製" : "複製分數與評語"}
           </button>
@@ -548,17 +703,40 @@ function SubmissionCard({
         </div>
       </div>
 
+      {resubmitted && (
+        <p className="warn-text" role="status">
+          這位學生在你評分之後又重新交了作業，下面是新交的內容，但分數還是舊版本的。
+          {locked ? "要改分數請先按「解鎖重新編輯」。" : "看過之後改分數，或按「請 AI 重評」。"}
+        </p>
+      )}
       {!turnedIn ? (
         <p className="muted small-text">這位學生還沒繳交這份作業，等他交了按「更新學生繳交」。</p>
       ) : submission.content_text ? (
         <div className={`submission-text ${longText && !showFull ? "clamped" : ""}`}>{submission.content_text}</div>
+      ) : attachments.length > 0 ? (
+        <p className="muted small-text">學生交的是檔案，點下面的檔名可以打開原檔。</p>
       ) : (
-        <p className="muted small-text">學生交的是檔案，AI 評分時會一起讀。</p>
+        <p className="muted small-text">學生按了繳交，但沒有寫內容，也沒有附檔案。</p>
       )}
       {longText && (
         <button className="ghost small" onClick={() => setShowFull(!showFull)}>
           {showFull ? "收起" : "看完整內容"}
         </button>
+      )}
+      {turnedIn && attachments.length > 0 && (
+        <ul className="attachment-list" aria-label="學生交的檔案">
+          {attachments.map((a, i) => (
+            <li key={i}>
+              {a.href ? (
+                <a href={a.href} target="_blank" rel="noopener noreferrer">
+                  📎 {a.name}
+                </a>
+              ) : (
+                <span className="muted">📎 {a.name}（這個連結沒辦法直接打開，請到 Classroom 看）</span>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
       {failure && (
@@ -567,8 +745,11 @@ function SubmissionCard({
         </div>
       )}
 
-      {submission.status ? (
+      {editorOpen ? (
         <div className="result-box">
+          {!submission.status && (
+            <div className="result-box-hint">自己打分：填好分數和評語，按「完成批改」就算數。</div>
+          )}
           {submission.status === "ai_suggested" && (
             <div className="result-box-hint">這是 AI 的建議，看過沒問題就按「完成批改」，要改直接改。</div>
           )}
@@ -592,13 +773,22 @@ function SubmissionCard({
               inputMode="decimal"
               min={0}
               max={maxPoints}
-              value={score}
+              step="any"
+              ref={scoreInputRef}
+              value={scoreText}
               disabled={locked}
-              onChange={(e) => setScore(Number(e.target.value))}
+              aria-invalid={!!scoreError}
+              aria-describedby={`score-err-${submission.id}`}
+              onChange={(e) => setScoreText(e.target.value)}
               className="input-short"
             />
             <span className="muted">／ {maxPoints}</span>
           </div>
+          {scoreError && (triedSave || scoreText !== savedScoreText) && (
+            <p className="error-text" id={`score-err-${submission.id}`} role="alert">
+              {scoreError}
+            </p>
+          )}
 
           {itemScores.length > 0 && (
             <div className="item-scores">
@@ -663,11 +853,34 @@ function SubmissionCard({
               <button className="secondary" onClick={copy}>
                 {copied ? "已複製" : "複製分數與評語"}
               </button>
-              <button className="ghost" onClick={onAiGrade} disabled={busy}>
-                {busy ? "評分中…" : "請 AI 重評"}
+              <button className={confirmOverwrite ? "warn" : "ghost"} onClick={requestAi} disabled={busy || saving}>
+                {busy ? "評分中…" : confirmOverwrite ? "確定讓 AI 重評" : hasAi ? "請 AI 重評" : "請 AI 評分"}
               </button>
-              <button className="ghost small" onClick={toggleHistory}>
-                {historyOpen ? "收起修改歷程" : "看修改歷程"}
+              {submission.status ? (
+                <button className="ghost small" onClick={toggleHistory}>
+                  {historyOpen ? "收起修改歷程" : "看修改歷程"}
+                </button>
+              ) : (
+                <button
+                  className="ghost small"
+                  onClick={() => {
+                    setManual(false);
+                    setScoreText(savedScoreText);
+                    setFeedback(savedFeedback);
+                    setTriedSave(false);
+                  }}
+                  disabled={saving}
+                >
+                  取消
+                </button>
+              )}
+            </div>
+          )}
+          {confirmOverwrite && (
+            <div className="fail-box" role="alert">
+              AI 重評會把{submission.status === "teacher_edited" ? "你改過的分數和評語" : "你剛打的字"}蓋掉，確定的話再按一次「確定讓 AI 重評」。
+              <button className="ghost small" onClick={() => setConfirmOverwrite(false)}>
+                算了
               </button>
             </div>
           )}
@@ -694,9 +907,16 @@ function SubmissionCard({
           </div>
         </div>
       ) : (
-        <button className="card-grade-btn" onClick={onAiGrade} disabled={busy || !turnedIn} title={!turnedIn ? "這位學生還沒繳交，交了才能評分" : undefined}>
-          {busy ? "AI 評分中…" : !turnedIn ? "還沒繳交" : failure ? "再評一次" : "請 AI 評這一位"}
-        </button>
+        <div className="row card-actions">
+          <button className="card-grade-btn" onClick={() => onAiGrade(false)} disabled={busy || !turnedIn} title={!turnedIn ? "這位學生還沒繳交，交了才能評分" : undefined}>
+            {busy ? "AI 評分中…" : !turnedIn ? "還沒繳交" : failure ? "請 AI 再評一次" : "請 AI 評這一位"}
+          </button>
+          {turnedIn && (
+            <button className="secondary card-grade-btn" onClick={() => setManual(true)} disabled={busy}>
+              自己打分
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

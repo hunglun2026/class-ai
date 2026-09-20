@@ -3,11 +3,12 @@ import { z } from "zod";
 import type { Env, Variables, Rubric } from "../types";
 import { requireAuth } from "../middleware";
 import { getValidAccessToken } from "../lib/tokens";
-import { listStudentSubmissions, listStudentsMap } from "../lib/classroom";
+import { listStudentSubmissions, listStudentsMap, lastTurnedInAt } from "../lib/classroom";
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
 import { bytesToBase64 } from "../lib/base64";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
 import { computeConfidenceFlags, injectionFlag } from "../lib/confidence";
+import { checkAiQuota, recordAiUse } from "../lib/usage";
 import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork } from "../lib/ownership";
 
@@ -27,7 +28,8 @@ interface AttachmentRecord {
 const MAX_TOTAL_INLINE_BYTES = 20 * 1024 * 1024;
 
 const SUBMISSIONS_SELECT = `
-  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags
+  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags,
+    g.updated_at AS grade_updated_at
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
 
@@ -85,10 +87,12 @@ submissionRoutes.post("/:courseId/:courseWorkId/sync", async (c) => {
   const now = Math.floor(Date.now() / 1000);
   const statements = submissions.map((sub) => {
     const studentName = nameMap.get(sub.userId) ?? sub.userId;
-    const contentText = sub.shortAnswerSubmission?.answer ?? "";
+    // 簡答題與選擇題的作答都在 Classroom 本身，不是附件（選擇題以前沒讀，全班會被當成空白繳交）
+    const contentText = sub.shortAnswerSubmission?.answer ?? sub.multipleChoiceSubmission?.answer ?? "";
     const attachments: AttachmentRecord[] = (sub.assignmentSubmission?.attachments ?? []).map((att) => {
       if (att.driveFile) {
-        return { type: "doc", driveFileId: att.driveFile.id, name: att.driveFile.title };
+        // alternateLink：老師在工具裡點得開學生原檔（Classroom 本來就會回，存起來不用再打 API）
+        return { type: "doc", driveFileId: att.driveFile.id, name: att.driveFile.title, url: att.driveFile.alternateLink };
       }
       if (att.link) {
         return { type: "link", name: att.link.title ?? att.link.url, url: att.link.url };
@@ -97,11 +101,11 @@ submissionRoutes.post("/:courseId/:courseWorkId/sync", async (c) => {
     });
 
     return c.env.DB.prepare(
-      `INSERT INTO submissions (id, coursework_id, student_id, student_name, state, content_text, attachments_json, fetched_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO submissions (id, coursework_id, student_id, student_name, state, content_text, attachments_json, fetched_at, turned_in_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET state = excluded.state, content_text = excluded.content_text,
-         attachments_json = excluded.attachments_json, fetched_at = excluded.fetched_at`
-    ).bind(sub.id, courseWorkId, sub.userId, studentName, sub.state, contentText, JSON.stringify(attachments), now);
+         attachments_json = excluded.attachments_json, fetched_at = excluded.fetched_at, turned_in_at = excluded.turned_in_at`
+    ).bind(sub.id, courseWorkId, sub.userId, studentName, sub.state, contentText, JSON.stringify(attachments), now, lastTurnedInAt(sub));
   });
 
   // D1 batch：一次送出整批寫入，不要在迴圈裡逐筆 await（30 個學生就是 30 次來回）
@@ -121,8 +125,8 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
   const submission = await c.env.DB.prepare(
     `SELECT s.* FROM submissions s
      JOIN coursework cw ON cw.id = s.coursework_id
-     JOIN courses c ON c.id = cw.course_id
-     WHERE s.id = ? AND c.teacher_id = ?`
+     JOIN course_teachers ct ON ct.course_id = cw.course_id
+     WHERE s.id = ? AND ct.teacher_id = ?`
   )
     .bind(submissionId, teacherId)
     .first<any>();
@@ -130,11 +134,15 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
 
   // 老師確認過的評分會自動鎖定（見 PATCH .../grade），鎖定後「請AI重評」不能悄悄蓋掉——
   // 這是十輪功能討論的P0：老師人工確認的東西不能被AI重評覆蓋，要先按「解鎖」才能重評。
-  const existingGrade = await c.env.DB.prepare("SELECT locked FROM grades WHERE submission_id = ?")
+  const existingGrade = await c.env.DB.prepare("SELECT locked, status FROM grades WHERE submission_id = ?")
     .bind(submissionId)
-    .first<{ locked: number }>();
+    .first<{ locked: number; status: string }>();
   if (existingGrade?.locked) {
     return c.json({ error: "這筆已經確認鎖定，請先按「解鎖重新評分」才能請AI重評", code: "locked" }, 409);
+  }
+  // 老師改過分數或評語（含自己打分）：AI 重評會蓋掉老師的修改，要前端確認過（?force=1）才做
+  if (existingGrade?.status === "teacher_edited" && c.req.query("force") !== "1") {
+    return c.json({ error: "這位你已經改過分數或評語，AI 重評會蓋掉你的修改", code: "overwrite_teacher_edit" }, 409);
   }
 
   // rubrics 09-15 起已改真正 upsert（coursework_id 唯一），一份作業只會有 0 或 1 列，不用再排序取最新
@@ -223,8 +231,20 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
     return c.json({ error }, 422);
   }
 
+  // 用量上限：擋住一位老師把大家共用的 AI 額度吃光。放在這裡＝前面那些「根本不用打 AI」的情況不扣次數
+  const quota = await checkAiQuota(c.env, teacherId);
+  if (!quota.ok) {
+    const error =
+      quota.reason === "daily"
+        ? `今天的 AI 評分次數用完了（每人每天 ${quota.dailyLimit} 次），明天會重置。你還是可以按「自己打分」繼續批改`
+        : "AI 評分太密集了，請等一分鐘再試（這是為了不要把大家共用的 AI 額度一次用光）";
+    return c.json({ error, code: quota.reason === "daily" ? "quota_daily" : "quota_minute", remainingToday: quota.remainingToday }, 429);
+  }
+
   try {
     const { result, model } = await gradeSubmission(c.env.GEMINI_API_KEY, rubric, submission.content_text ?? "", extracted);
+    // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數
+    const remainingToday = await recordAiUse(c.env, teacherId);
     const now = Math.floor(Date.now() / 1000);
     const gradeId = crypto.randomUUID();
     const confidenceFlags = computeConfidenceFlags(rubric, result);
@@ -277,7 +297,7 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
       now
     );
 
-    return c.json({ grade: result, model, confidenceFlags });
+    return c.json({ grade: result, model, confidenceFlags, remainingToday });
   } catch (e) {
     console.error("[ai-grade]", e);
     const kind: GradeFailKind = e instanceof GradeError ? e.kind : "unknown";
@@ -332,58 +352,68 @@ submissionRoutes.get("/:courseWorkId/export.xlsx", async (c) => {
 });
 
 const updateGradeBody = z.object({
-  finalScore: z.number(),
+  finalScore: z.number().finite(),
   finalFeedback: z.string(),
   confirm: z.boolean().default(false),
 });
 
-// 老師微調分數/評語；confirm=true 表示老師確認定案
+const MAX_FEEDBACK_LENGTH = 5000;
+
+// 老師改分數/評語，或 AI 沒評過（失敗、被擋）時老師自己打分；confirm=true 表示老師確認定案
 submissionRoutes.patch("/:submissionId/grade", async (c) => {
   const teacherId = c.get("teacherId");
   const submissionId = c.req.param("submissionId");
   const body = updateGradeBody.parse(await c.req.json());
   const now = Math.floor(Date.now() / 1000);
 
-  // 已鎖定（老師之前確認過）就不能直接改，要先解鎖——避免老師以為只是改個字，
-  // 卻沒注意到這筆其實已經定案過，改完又忘了重新確認
-  const lockRow = await c.env.DB.prepare(
-    `SELECT g.locked FROM grades g
-     JOIN submissions s ON s.id = g.submission_id
+  // 一次查完：是不是自己的學生、有沒有鎖定、這份作業總分幾分（評分標準的總分優先，跟前端顯示一致）
+  const info = await c.env.DB.prepare(
+    `SELECT r.id AS rubric_id, r.max_points AS rubric_max, cw.max_points AS cw_max, g.locked
+     FROM submissions s
      JOIN coursework cw ON cw.id = s.coursework_id
-     JOIN courses c ON c.id = cw.course_id
-     WHERE g.submission_id = ? AND c.teacher_id = ?`
+     JOIN course_teachers ct ON ct.course_id = cw.course_id
+     LEFT JOIN rubrics r ON r.coursework_id = s.coursework_id
+     LEFT JOIN grades g ON g.submission_id = s.id
+     WHERE s.id = ? AND ct.teacher_id = ?`
   )
     .bind(submissionId, teacherId)
-    .first<{ locked: number }>();
-  if (lockRow?.locked) {
+    .first<{ rubric_id: string | null; rubric_max: number | null; cw_max: number | null; locked: number | null }>();
+  if (!info) return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
+
+  // 已鎖定（老師之前確認過）就不能直接改，要先解鎖——避免老師以為只是改個字，
+  // 卻沒注意到這筆其實已經定案過，改完又忘了重新確認
+  if (info.locked) {
     return c.json({ error: "這筆已經確認鎖定，請先按「解鎖」才能修改", code: "locked" }, 409);
   }
 
-  // 權限檢查併進 UPDATE 的 WHERE，不要跟前面 ai-grade 一樣先查一次歸屬再寫一次——
-  // 這支是老師改分/確認的路徑，每次編輯評語都會打，改完看 changes 判斷有沒有真的動到
-  const result = await c.env.DB.prepare(
-    `UPDATE grades SET final_score = ?, final_feedback = ?, status = ?, locked = ?, updated_at = ?
-     WHERE submission_id = ? AND submission_id IN (
-       SELECT s.id FROM submissions s
-       JOIN coursework cw ON cw.id = s.coursework_id
-       JOIN courses c ON c.id = cw.course_id
-       WHERE c.teacher_id = ?
-     )`
+  const maxPoints = info.rubric_max ?? info.cw_max ?? 100;
+  if (body.finalScore < 0 || body.finalScore > maxPoints) {
+    return c.json({ error: `分數要在 0 到 ${maxPoints} 分之間` }, 400);
+  }
+  if (body.finalFeedback.length > MAX_FEEDBACK_LENGTH) {
+    return c.json({ error: `評語太長了，請控制在 ${MAX_FEEDBACK_LENGTH} 字以內` }, 400);
+  }
+
+  // 沒有 grades 列（AI 從沒評成功過）就新增一列、ai_* 留空；有就只改老師的欄位，AI 的原始建議保留
+  await c.env.DB.prepare(
+    `INSERT INTO grades (id, submission_id, rubric_id, final_score, final_feedback, status, locked, graded_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(submission_id) DO UPDATE SET
+       final_score = excluded.final_score, final_feedback = excluded.final_feedback,
+       status = excluded.status, locked = excluded.locked, updated_at = excluded.updated_at`
   )
     .bind(
+      crypto.randomUUID(),
+      submissionId,
+      info.rubric_id,
       body.finalScore,
       body.finalFeedback,
       body.confirm ? "confirmed" : "teacher_edited",
       body.confirm ? 1 : 0,
       now,
-      submissionId,
-      teacherId
+      now
     )
     .run();
-
-  if (result.meta.changes === 0) {
-    return c.json({ error: "找不到這份繳交紀錄，或不屬於你" }, 404);
-  }
 
   await logGradeHistory(
     c.env.DB,
@@ -398,7 +428,7 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
   // AI評分可信度。刻意不查、不存學生姓名或作業原文——只要分數差距，記錄失敗也不影響這次確認。
   if (body.confirm) {
     try {
-      const info = await c.env.DB.prepare(
+      const calib = await c.env.DB.prepare(
         `SELECT g.ai_score, r.mode, r.max_points FROM grades g
          JOIN submissions s ON s.id = g.submission_id
          JOIN rubrics r ON r.coursework_id = s.coursework_id
@@ -406,12 +436,12 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
       )
         .bind(submissionId)
         .first<{ ai_score: number | null; mode: string; max_points: number }>();
-      if (info && info.ai_score != null) {
+      if (calib && calib.ai_score != null) {
         await c.env.DB.prepare(
           `INSERT INTO grading_calibration_logs (id, mode, max_points, ai_score, teacher_final_score, created_at)
            VALUES (?, ?, ?, ?, ?, ?)`
         )
-          .bind(crypto.randomUUID(), info.mode, info.max_points, info.ai_score, body.finalScore, now)
+          .bind(crypto.randomUUID(), calib.mode, calib.max_points, calib.ai_score, body.finalScore, now)
           .run();
       }
     } catch (e) {
@@ -433,8 +463,8 @@ submissionRoutes.post("/:submissionId/unlock", async (c) => {
     `SELECT g.final_score, g.final_feedback FROM grades g
      JOIN submissions s ON s.id = g.submission_id
      JOIN coursework cw ON cw.id = s.coursework_id
-     JOIN courses c ON c.id = cw.course_id
-     WHERE g.submission_id = ? AND c.teacher_id = ?`
+     JOIN course_teachers ct ON ct.course_id = cw.course_id
+     WHERE g.submission_id = ? AND ct.teacher_id = ?`
   )
     .bind(submissionId, teacherId)
     .first<{ final_score: number; final_feedback: string }>();
@@ -445,8 +475,8 @@ submissionRoutes.post("/:submissionId/unlock", async (c) => {
      WHERE submission_id = ? AND submission_id IN (
        SELECT s.id FROM submissions s
        JOIN coursework cw ON cw.id = s.coursework_id
-       JOIN courses c ON c.id = cw.course_id
-       WHERE c.teacher_id = ?
+       JOIN course_teachers ct ON ct.course_id = cw.course_id
+       WHERE ct.teacher_id = ?
      )`
   )
     .bind(now, submissionId, teacherId)
@@ -465,8 +495,8 @@ submissionRoutes.get("/:submissionId/history", async (c) => {
   const owns = await c.env.DB.prepare(
     `SELECT 1 FROM submissions s
      JOIN coursework cw ON cw.id = s.coursework_id
-     JOIN courses c ON c.id = cw.course_id
-     WHERE s.id = ? AND c.teacher_id = ?`
+     JOIN course_teachers ct ON ct.course_id = cw.course_id
+     WHERE s.id = ? AND ct.teacher_id = ?`
   )
     .bind(submissionId, teacherId)
     .first();

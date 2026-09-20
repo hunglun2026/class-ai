@@ -12,6 +12,9 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
 ];
 
+// 少了任何一個就不能用（openid/email/profile 是登入本身，Google 一定會給）
+export const REQUIRED_SCOPES = SCOPES.filter((s) => s.startsWith("https://"));
+
 export function buildAuthUrl(env: Env, state: string): string {
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
@@ -30,6 +33,7 @@ interface TokenResponse {
   refresh_token?: string;
   expires_in: number;
   id_token: string;
+  scope?: string; // 老師實際勾選同意的權限（空白分隔）
 }
 
 export async function exchangeCodeForTokens(env: Env, code: string): Promise<TokenResponse> {

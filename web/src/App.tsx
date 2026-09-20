@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, Link, useNavigate } from "react-router-dom";
-import { api } from "./api";
+import { Routes, Route, useNavigate } from "react-router-dom";
+import { api, ApiError, AUTH_LOST_EVENT } from "./api";
+import SafeLink from "./components/SafeLink";
+import { clearPending, confirmLeave } from "./unsaved";
 import Login from "./pages/Login";
 import Courses from "./pages/Courses";
 import CourseWork from "./pages/CourseWork";
@@ -16,17 +18,36 @@ interface Teacher {
 
 export default function App() {
   const [teacher, setTeacher] = useState<Teacher | null | undefined>(undefined);
+  // 被踢回登入頁的原因（登入過期、連不上伺服器），登入頁顯示給老師看
+  const [notice, setNotice] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.me().then((r) => setTeacher(r.teacher)).catch(() => setTeacher(null));
+    api
+      .me()
+      .then((r) => setTeacher(r.teacher))
+      .catch((e) => {
+        if (e instanceof ApiError && e.code === "network") setNotice(e.message);
+        setTeacher(null);
+      });
+  }, []);
+
+  // 任何一頁發現登入過期，都統一回到登入頁並說明原因
+  useEffect(() => {
+    const onLost = (e: Event) => {
+      clearPending();
+      setNotice((e as CustomEvent<string>).detail || "登入已過期，請重新登入");
+      setTeacher(null);
+    };
+    window.addEventListener(AUTH_LOST_EVENT, onLost);
+    return () => window.removeEventListener(AUTH_LOST_EVENT, onLost);
   }, []);
 
   if (teacher === undefined) return <div className="container muted">載入中…</div>;
   if (teacher === null)
     return (
       <>
-        <Login />
+        <Login notice={notice} />
         <VersionTag />
       </>
     );
@@ -34,17 +55,21 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <Link to="/" className="brand-link">
+        <SafeLink to="/" className="brand-link">
           <img src="/hunglun-logo.png?v=2" alt="鴻綸科技" className="header-logo" />
           <span className="brand-name">classAI</span>
-        </Link>
+        </SafeLink>
         <div className="row">
           <span className="teacher-name">{teacher.name}</span>
           <button
             className="secondary"
             onClick={async () => {
-              await api.logout();
-              navigate(0);
+              if (!confirmLeave()) return;
+              try {
+                await api.logout();
+              } finally {
+                navigate(0);
+              }
             }}
           >
             登出
