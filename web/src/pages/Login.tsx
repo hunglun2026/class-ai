@@ -12,10 +12,27 @@ const LOGIN_ERRORS: Record<string, string> = {
   failed: "登入沒有成功，請再試一次。一直失敗的話，請換一個瀏覽器（建議 Chrome）再試。",
 };
 
+// 後端會用 ?missing=courses,drive 告訴我們少了哪幾項，換成老師在 Google 畫面上看到的字
+const SCOPE_NAMES: Record<string, string> = {
+  courses: "查看你的 Google Classroom 課程",
+  coursework: "查看課堂作業與學生繳交的內容",
+  rosters: "查看課程裡的學生名單",
+  drive: "查看你 Google 雲端硬碟裡的檔案",
+};
+
 // 只讀不改：React 開發模式會故意把 useState 的初始函式跑兩次，這裡如果順手改網址，第二次就讀不到了
 function readLoginError(): string {
-  const code = new URLSearchParams(window.location.search).get("login_error");
-  return code ? LOGIN_ERRORS[code] ?? LOGIN_ERRORS.failed : "";
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("login_error");
+  if (!code) return "";
+  const base = LOGIN_ERRORS[code] ?? LOGIN_ERRORS.failed;
+  if (code !== "scopes") return base;
+  const missing = (params.get("missing") ?? "")
+    .split(",")
+    .map((k) => SCOPE_NAMES[k])
+    .filter(Boolean);
+  // 知道少哪幾項就直接點名，老師不用自己一項一項對
+  return missing.length ? `${base}這次少了：${missing.join("、")}。` : base;
 }
 
 export default function Login({ notice }: { notice?: string }) {
@@ -27,6 +44,7 @@ export default function Login({ notice }: { notice?: string }) {
     const params = new URLSearchParams(window.location.search);
     if (!params.has("login_error")) return;
     params.delete("login_error");
+    params.delete("missing");
     const rest = params.toString();
     window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
   }, []);

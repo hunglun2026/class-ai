@@ -18,14 +18,28 @@ export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 authRoutes.get("/google/login", (c) => {
   const state = crypto.randomUUID();
   c.header("Set-Cookie", oauthStateCookieHeader(c.env, state));
+  // 這一跳絕對不能被瀏覽器留在快取裡：每次登入的 state 都不一樣，導回網址之後若有調整，
+  // 舊的那一條會被重送，老師就會看到 Google 的 redirect_uri_mismatch，還以為是帳號有問題
+  c.header("Cache-Control", "no-store");
   return c.redirect(buildAuthUrl(c.env, state));
 });
 
+// 權限網址太長，帶回前端時換成短代碼，登入頁再換成老師看得懂的名稱
+const SCOPE_KEYS: Record<string, string> = {
+  "https://www.googleapis.com/auth/classroom.courses.readonly": "courses",
+  "https://www.googleapis.com/auth/classroom.coursework.students.readonly": "coursework",
+  "https://www.googleapis.com/auth/classroom.rosters.readonly": "rosters",
+  "https://www.googleapis.com/auth/drive.readonly": "drive",
+};
+const scopeKey = (scope: string) => SCOPE_KEYS[scope] ?? "other";
+
 // 登入失敗一律導回前端登入頁，用代碼讓登入頁顯示白話說明＋重新登入按鈕，不丟一頁純文字錯誤給老師
 type LoginError = "cancelled" | "expired" | "scopes" | "no_refresh" | "failed";
-function backToLogin(c: Context<{ Bindings: Env; Variables: Variables }>, reason: LoginError) {
+function backToLogin(c: Context<{ Bindings: Env; Variables: Variables }>, reason: LoginError, detail?: string) {
   c.header("Set-Cookie", clearOauthStateCookieHeader(), { append: true });
-  return c.redirect(`${c.env.APP_URL}/?login_error=${reason}`);
+  c.header("Cache-Control", "no-store");
+  const extra = detail ? `&missing=${encodeURIComponent(detail)}` : "";
+  return c.redirect(`${c.env.APP_URL}/?login_error=${reason}${extra}`);
 }
 
 authRoutes.get("/google/callback", async (c) => {
@@ -46,8 +60,11 @@ authRoutes.get("/google/callback", async (c) => {
     const tokens = await exchangeCodeForTokens(c.env, code);
     // Google 同意畫面可以逐項取消勾選；少勾一項，登入會成功但之後讀課程／檔案全部失敗，要在這裡就攔下
     const granted = new Set((tokens.scope ?? "").split(" "));
-    if (REQUIRED_SCOPES.some((s) => !granted.has(s))) {
-      return backToLogin(c, "scopes");
+    const missing = REQUIRED_SCOPES.filter((s) => !granted.has(s));
+    if (missing.length) {
+      // 把少了哪幾項帶回登入頁，老師才知道要重新勾哪一個，不是只看到「有權限沒勾到」
+      console.warn("[auth/callback] 少了權限", missing.join(","), "實際拿到", tokens.scope);
+      return backToLogin(c, "scopes", missing.map(scopeKey).join(","));
     }
     if (!tokens.refresh_token) {
       // 使用者之前同意過，Google 這次沒再給 refresh_token；請他到 Google 帳號權限頁撤銷後重新登入

@@ -449,6 +449,19 @@ console.log("\n== 五、全 App 防呆（v1.8.0） ==");
     "x." + Buffer.from(JSON.stringify({ sub, email: `${sub}@x.tw`, name: "新老師" })).toString("base64url") + ".y";
   const ALL = "openid email profile https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.coursework.students.readonly https://www.googleapis.com/auth/classroom.rosters.readonly https://www.googleapis.com/auth/drive.readonly";
 
+  // 導回網址改過之後，瀏覽器不可以重送舊的那一條（會被 Google 擋成 redirect_uri_mismatch）
+  {
+    const res = await app.fetch(new Request("http://localhost/api/auth/google/login"), env, { waitUntil() {}, passThroughOnException() {} } as any);
+    const loc = res.headers.get("Location") ?? "";
+    check(
+      "5-0 登入跳轉：不准快取、帶正確的 redirect_uri",
+      res.status === 302 &&
+        (res.headers.get("Cache-Control") ?? "").includes("no-store") &&
+        loc.includes(encodeURIComponent(env.GOOGLE_REDIRECT_URI)),
+      `${res.status} ${res.headers.get("Cache-Control")}`
+    );
+  }
+
   let r = await cb("error=access_denied&state=st1");
   check("5-1 在 Google 按取消：導回登入頁並帶 cancelled", r.status === 302 && r.location.endsWith("/?login_error=cancelled"), r.location);
   r = await cb("code=c1&state=WRONG");
@@ -456,7 +469,19 @@ console.log("\n== 五、全 App 防呆（v1.8.0） ==");
   tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("scopes-teacher"), scope: ALL.replace(" https://www.googleapis.com/auth/drive.readonly", "") };
   r = await cb("code=c1&state=st1");
   const noRow: any = await env.DB.prepare("SELECT 1 FROM teachers WHERE id = 'scopes-teacher'").first();
-  check("5-3 沒勾雲端硬碟權限：導回並帶 scopes、不建立帳號", r.status === 302 && r.location.endsWith("/?login_error=scopes") && !noRow, r.location);
+  check(
+    "5-3 沒勾雲端硬碟權限：導回並帶 scopes、點名少了 drive、不建立帳號",
+    r.status === 302 && r.location.endsWith("/?login_error=scopes&missing=drive") && !noRow,
+    r.location
+  );
+  // 少兩項就要兩項都點名，老師才不會重新登入之後又少勾另一個
+  tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("scopes-teacher2"), scope: "openid email profile https://www.googleapis.com/auth/classroom.rosters.readonly" };
+  r = await cb("code=c1&state=st1");
+  check("5-3b 少兩項：missing 兩項都帶回去", r.location.endsWith("/?login_error=scopes&missing=courses%2Ccoursework%2Cdrive"), r.location);
+  // Google 沒回 scope 欄位時不能當成「全部都有」，要擋下來
+  tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("scopes-teacher3"), scope: undefined } as any;
+  r = await cb("code=c1&state=st1");
+  check("5-3c Google 沒回權限清單：一樣擋下來", r.location.includes("login_error=scopes"), r.location);
   tokenResponse = { access_token: "a", expires_in: 3600, id_token: idToken("norefresh"), scope: ALL };
   r = await cb("code=c1&state=st1");
   check("5-4 沒拿到 refresh token：導回並帶 no_refresh", r.location.endsWith("/?login_error=no_refresh"), r.location);
