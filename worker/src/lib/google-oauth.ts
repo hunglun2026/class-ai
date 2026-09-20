@@ -12,8 +12,26 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
 ];
 
-// 少了任何一個就不能用（openid/email/profile 是登入本身，Google 一定會給）
-export const REQUIRED_SCOPES = SCOPES.filter((s) => s.startsWith("https://"));
+// 少了任何一個就不能用（openid/email/profile 是登入本身，Google 一定會給）。
+// 每一組裡面只要有一個就算數：2026-09-20 實測，Google 對這個還沒送正式驗證的 App，
+// 一律把我們要的 classroom.coursework.students.readonly 換成範圍較小的
+// classroom.student-submissions.students.readonly 發回來（同一個帳號連試兩次，結果完全一樣）。
+// 兩個都收，老師才不會被擋在門外；真的不夠用的話，會在讀作業清單時回 403，
+// 那邊已經有看得懂的錯誤訊息。
+export const REQUIRED_SCOPE_GROUPS: string[][] = [
+  ["https://www.googleapis.com/auth/classroom.courses.readonly"],
+  [
+    "https://www.googleapis.com/auth/classroom.coursework.students.readonly",
+    "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
+  ],
+  ["https://www.googleapis.com/auth/classroom.rosters.readonly"],
+  ["https://www.googleapis.com/auth/drive.readonly"],
+];
+
+// 回傳少了哪幾組（每組給第一個名稱當代表，用來換成老師看得懂的說明）
+export function missingScopes(granted: Set<string>): string[] {
+  return REQUIRED_SCOPE_GROUPS.filter((g) => !g.some((s) => granted.has(s))).map((g) => g[0]);
+}
 
 export function buildAuthUrl(env: Env, state: string): string {
   const params = new URLSearchParams({

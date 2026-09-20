@@ -478,6 +478,13 @@ console.log("\n== 五、全 App 防呆（v1.8.0） ==");
   tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("scopes-teacher2"), scope: "openid email profile https://www.googleapis.com/auth/classroom.rosters.readonly" };
   r = await cb("code=c1&state=st1");
   check("5-3b 少兩項：missing 兩項都帶回去", r.location.endsWith("/?login_error=scopes&missing=courses%2Ccoursework%2Cdrive"), r.location);
+  // Google 對還沒送驗證的 App 會把 coursework.students.readonly 換成 student-submissions.students.readonly
+  // 發回來（2026-09-20 實測），這種也要放行，不然老師永遠登不進來
+  tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("sub-scope"), scope: ALL.replace("coursework.students.readonly", "student-submissions.students.readonly") };
+  r = await cb("code=c1&state=st1");
+  const subRow: any = await env.DB.prepare("SELECT 1 FROM teachers WHERE id = 'sub-scope'").first();
+  check("5-3d Google 換成 student-submissions 也算數：登入成功", !r.location.includes("login_error") && !!subRow, r.location);
+
   // Google 沒回 scope 欄位時不能當成「全部都有」，要擋下來
   tokenResponse = { access_token: "a", refresh_token: "rt", expires_in: 3600, id_token: idToken("scopes-teacher3"), scope: undefined } as any;
   r = await cb("code=c1&state=st1");

@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { Env, Variables } from "../types";
-import { buildAuthUrl, decodeIdToken, exchangeCodeForTokens, REQUIRED_SCOPES } from "../lib/google-oauth";
+import { buildAuthUrl, decodeIdToken, exchangeCodeForTokens, missingScopes } from "../lib/google-oauth";
 import { encrypt } from "../lib/crypto";
 import {
   createSession,
@@ -60,7 +60,7 @@ authRoutes.get("/google/callback", async (c) => {
     const tokens = await exchangeCodeForTokens(c.env, code);
     // Google 同意畫面可以逐項取消勾選；少勾一項，登入會成功但之後讀課程／檔案全部失敗，要在這裡就攔下
     const granted = new Set((tokens.scope ?? "").split(" "));
-    const missing = REQUIRED_SCOPES.filter((s) => !granted.has(s));
+    const missing = missingScopes(granted);
     if (missing.length) {
       // 把少了哪幾項帶回登入頁，老師才知道要重新勾哪一個，不是只看到「有權限沒勾到」
       console.warn("[auth/callback] 少了權限", missing.join(","), "實際拿到", tokens.scope);
