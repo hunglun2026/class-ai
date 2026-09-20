@@ -11,9 +11,10 @@ export async function onRequest({ request, env }) {
   const incoming = new URL(request.url);
   const target = new URL((env.WORKER_ORIGIN || DEFAULT_WORKER).replace(/\/$/, "") + incoming.pathname + incoming.search);
 
-  // 照抄原請求，只換網址；Worker 需要知道老師原本是從哪個網域來的（CORS 與來源檢查用）
+  // 照抄原請求，只換網址。
+  // ⚠ 絕對不要自己覆寫 Origin：Worker 靠這個欄位判斷「這個請求是不是從 classAI 自己的網站送出的」，
+  // 覆寫掉的話，任何網站冒用老師身分送來的請求都會被當成自家的，來源檢查等於失效（2026-09-20 上線前抓到）。
   const headers = new Headers(request.headers);
-  headers.set("Origin", incoming.origin);
   headers.delete("Host");
 
   const res = await fetch(
