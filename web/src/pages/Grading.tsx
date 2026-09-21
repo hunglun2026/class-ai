@@ -147,6 +147,19 @@ export default function Grading() {
       .catch(() => setRemaining(null)); // 讀不到就不顯示，不擋老師做事
   }, []);
 
+  // 老師打開時看到的應該是「已經評好」的結果，不是一份一份按：已繳交還沒評的學生自動評。
+  // 每位學生只自動試一次（失敗的留給「只重評失敗的」），且只評到今天剩餘額度為止
+  const autoTried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!rubric || !submissions || batch || remaining === null || remaining <= 0) return;
+    const todo = submissions.filter((s) => !s.status && hasTurnedIn(s) && !autoTried.current.has(s.id));
+    if (!todo.length) return;
+    const chosen = todo.slice(0, remaining);
+    chosen.forEach((s) => autoTried.current.add(s.id));
+    gradeMany(chosen, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rubric, submissions, batch, remaining]);
+
   async function refreshSubmissions() {
     if (!courseWorkId) return;
     const r = await api.listSubmissions(courseWorkId);
@@ -230,9 +243,9 @@ export default function Grading() {
   }
 
   // 同時最多評 3 位；每評完一位就刷新，結果一個一個出現，不用等全班跑完
-  async function gradeMany(list: Submission[]) {
+  async function gradeMany(list: Submission[], auto = false) {
     if (!list.length) return;
-    if (remaining !== null && list.length > remaining) {
+    if (!auto && remaining !== null && list.length > remaining) {
       const ok = window.confirm(
         remaining === 0
           ? "今天的 AI 評分次數已經用完，明天會重置。你還是可以用「自己打分」繼續批改。"
@@ -398,7 +411,7 @@ export default function Grading() {
         )}
         {batch && (
           <div className="batch-note" role="status">
-            AI 正在評第 {Math.min(batch.done + 1, batch.total)}／{batch.total} 位。全部大約要 1～3
+            AI 正在自動評第 {Math.min(batch.done + 1, batch.total)}／{batch.total} 位，評好的會一位一位出現。全部大約要 1～3
             分鐘，可以先切到別的分頁，但不要關掉這一頁。
           </div>
         )}
