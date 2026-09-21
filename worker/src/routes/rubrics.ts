@@ -4,6 +4,7 @@ import type { Env, Variables } from "../types";
 import { requireAuth } from "../middleware";
 import { ownsCourseWork } from "../lib/ownership";
 import { extractExcelText } from "../lib/excel";
+import { extractDocxText } from "../lib/docx";
 import { base64ToBytes } from "../lib/base64";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -23,7 +24,20 @@ const EXCEL_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
   "application/vnd.ms-excel", // .xls
 ];
-const ALLOWED_ANSWER_KEY_FILE_MIME = ["image/jpeg", "image/png", "image/webp", "application/pdf", ...EXCEL_MIME_TYPES];
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+// txt／md／csv 前端都標成 text/plain，後端只需要認這一種
+const TEXT_MIME = "text/plain";
+// 抽出來的文字存在 D1 一列裡（單列上限 2MB），中文一字約 3 位元組，超過就砍，避免寫入失敗
+const MAX_EXTRACTED_CHARS = 200000;
+const ALLOWED_ANSWER_KEY_FILE_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  ...EXCEL_MIME_TYPES,
+  DOCX_MIME,
+  TEXT_MIME,
+];
 
 const answerKeyFileSchema = z.object({
   name: z.string(),
@@ -136,6 +150,22 @@ rubricRoutes.post("/", async (c) => {
       } catch (e) {
         console.error("[rubrics] Excel 解析失敗", e);
         return c.json({ error: "這個 Excel 檔讀不出來，可能檔案損壞或有密碼保護。請用 Excel 打開後另存成新的 .xlsx 再上傳" }, 400);
+      }
+    } else if (fileMime === DOCX_MIME || fileMime === TEXT_MIME) {
+      // Word／純文字跟 Excel 一樣：上傳時就解析成文字存起來，評分時直接給 AI 讀
+      try {
+        const bytes = base64ToBytes(body.answerKeyFile.base64);
+        const text =
+          fileMime === DOCX_MIME
+            ? extractDocxText(bytes)
+            : new TextDecoder("utf-8").decode(bytes).replace(/^﻿/, "");
+        fileExtractedText = text.trim().slice(0, MAX_EXTRACTED_CHARS);
+      } catch (e) {
+        console.error("[rubrics] 文字檔解析失敗", e);
+        return c.json({ error: "這個檔案讀不出來，可能檔案損壞或有密碼保護。請重新另存成新的檔案再上傳" }, 400);
+      }
+      if (!fileExtractedText) {
+        return c.json({ error: "這個檔案裡沒有讀到文字（可能整份都是圖片），請改傳 PDF 或照片，或把答案貼到文字框" }, 400);
       }
     } else {
       // 圖片/PDF 放 R2：D1 單列上限 2MB，base64 後原始檔超過約 1.4MB 就存不進 D1

@@ -27,7 +27,7 @@ const DEFAULT_INSTRUCTIONS =
 export const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "freetext", label: "用文字寫要求", hint: "打幾句話告訴 AI 怎麼改，適合大部分作業" },
   { value: "rubric", label: "填項目算分數", hint: "分成幾個項目各自配分，例如作文" },
-  { value: "answer_key", label: "上傳檔案評分", hint: "有固定答案的題目，可以貼文字或上傳照片／PDF／Excel" },
+  { value: "answer_key", label: "上傳檔案評分", hint: "有固定答案的題目，可以貼文字，或上傳照片、PDF、Word、Excel、純文字檔" },
 ];
 
 export const MODE_LABEL: Record<Mode, string> = {
@@ -48,19 +48,23 @@ const EXT_MIME: Record<string, string> = {
   pdf: "application/pdf",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   xls: "application/vnd.ms-excel",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  txt: "text/plain",
+  md: "text/plain",
+  csv: "text/plain",
 };
 
 function fileProblem(file: File): string | null {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (file.size === 0) return "這個檔案是空的，請重新選一次";
   if (file.size > MAX_ANSWER_KEY_FILE_BYTES) return "檔案太大，請控制在 8MB 以內（照片可以用手機截圖縮小）";
-  if (ext === "doc" || ext === "docx") return "Word 檔不能直接上傳，請在 Word 裡「另存新檔」成 PDF 再上傳，或把答案貼到上面的文字框";
+  if (ext === "doc") return "舊版 Word（.doc）讀不了，請在 Word 裡「另存新檔」成 .docx 或 PDF 再上傳，或把答案貼到上面的文字框";
   if (ext === "heic" || ext === "heif") return "iPhone 的 HEIC 照片不能上傳，請改傳截圖，或到「設定 → 相機 → 格式」改成「最相容」再拍";
-  if (!EXT_MIME[ext]) return "只能上傳照片（JPG、PNG）、PDF 或 Excel 檔";
+  if (!EXT_MIME[ext]) return "可以上傳照片（JPG、PNG）、PDF、Word（.docx）、Excel、純文字（.txt、.md、.csv）";
   return null;
 }
 const ANSWER_KEY_FILE_ACCEPT =
-  "image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.xlsx,.xls";
+  "image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,.xlsx,.xls,.docx,.txt,.md,.csv";
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -556,7 +560,7 @@ function RubricForm({
           <textarea
             rows={4}
             aria-label="標準答案"
-            placeholder="把標準答案貼在這裡；或是在下面上傳答案的照片、PDF、Excel"
+            placeholder="把標準答案貼在這裡；或是在下面上傳答案的照片、PDF、Word、Excel 或純文字檔"
             value={answerKey}
             onChange={(e) => setAnswerKey(e.target.value)}
           />

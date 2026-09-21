@@ -11,6 +11,10 @@ import { XMLParser } from "fast-xml-parser";
 const parser = new XMLParser({
   preserveOrder: true,
   ignoreAttributes: true,
+  // 預設會把純數字文字（「10」）轉成 number，下面只認字串就整個丟掉；
+  // 也會修掉前後空白，「Hello 」＋「world」會黏成一個字。兩個都關掉，文字原樣留著
+  parseTagValue: false,
+  trimValues: false,
 });
 
 type XmlNode = Record<string, any>;
