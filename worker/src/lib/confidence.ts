@@ -23,6 +23,31 @@ export function computeConfidenceFlags(rubric: Rubric, result: AiGradeResult): s
   return flags;
 }
 
+export type RiskLevel = "green" | "yellow" | "red";
+
+/**
+ * 2026-09-23 這輪十輪討論的P0：三色分流。跟confidenceFlags同一套精神——不额外多打AI
+ * （不重評3次算變異度，那條路上一輪十輪討論已經因為3倍AI成本被否決過），risk_level是
+ * 拿「已經算好的證據」組合出來的：
+ *   🔴 紅：有confidenceFlags（缺項目分數/0分或滿分/疑似提示詞注入/附件AI讀不到）
+ *         ——這些都是「AI自己都不確定的訊號」，值得老師看
+ *   🟡 黃：沒有明確flag，但分數落在總分的頭尾5%以內（很極端的分數，AI偶爾誤判的高風險區）
+ *         或這份評分標準還沒有任何校準範例（AI還沒抓到這位老師的鬆緊標準，第一次用先看一下）
+ *   🟢 綠：以上都沒有，AI判斷相對穩定
+ */
+export function computeRiskLevel(
+  flags: string[],
+  score: number,
+  maxPoints: number,
+  hasCalibrationExamples: boolean
+): RiskLevel {
+  if (flags.length > 0) return "red";
+  const edgeMargin = Math.max(maxPoints * 0.05, 1);
+  const nearEdge = maxPoints > 0 && (score <= edgeMargin || score >= maxPoints - edgeMargin);
+  if (nearEdge || !hasCalibrationExamples) return "yellow";
+  return "green";
+}
+
 // 學生內容裡「對 AI 下指令」的常見句型。刻意寫窄：只抓針對評分系統的說法，
 // 一般作文裡的「不要忽略細節」「我希望考好」不會命中。AI 自己的判斷（injectionSuspected）
 // 另外一層，兩者任一成立就警示，後端規則不怕模型被說服。

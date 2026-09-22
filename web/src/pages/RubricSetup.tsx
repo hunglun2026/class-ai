@@ -185,12 +185,38 @@ function RubricForm({
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateError, setTemplateError] = useState("");
 
+  // 讀老師在 Classroom 網頁已經設定好的量表：只在「這份作業還沒存過 classAI 自己的量表」時才問，
+  // 已經存過的就不要每次進頁面都跳出來洗版。null＝還沒查完或沒找到，不特別區分（都不顯示 banner）。
+  const [classroomRubric, setClassroomRubric] = useState<{
+    rubricItems: RubricItem[];
+    maxPoints: number;
+  } | null>(null);
+  const [classroomRubricDismissed, setClassroomRubricDismissed] = useState(false);
+
   useEffect(() => {
     api
       .myRubricTemplates()
       .then((r) => setMyTemplates(r.templates as any))
       .catch(() => setMyTemplates([]));
   }, []);
+
+  useEffect(() => {
+    if (initial) return; // 已經存過 classAI 量表，不用再從 Classroom 帶一次
+    api
+      .getClassroomRubric(courseWorkId)
+      .then((r) => setClassroomRubric(r.rubric))
+      .catch(() => {}); // 讀不到就算了，不擋老師手動設定
+  }, [courseWorkId, initial]);
+
+  function applyClassroomRubric() {
+    if (!classroomRubric) return;
+    if (!confirmOverwriteContent()) return;
+    setMode("rubric");
+    setMaxPoints(classroomRubric.maxPoints);
+    setItems(classroomRubric.rubricItems);
+    setAppliedTemplate("Classroom 評分量表");
+    setClassroomRubricDismissed(true);
+  }
 
   const filledItems = items.filter((it) => it.item.trim());
   // 加總算畫面上每一列（包含還沒取名的），老師看到的數字才跟輸入框對得起來
@@ -378,6 +404,25 @@ function RubricForm({
 
   return (
     <div className="card form-card">
+      {classroomRubric && !classroomRubricDismissed && (
+        <div className="info-box classroom-rubric-banner">
+          <div>
+            <strong>已從 Google Classroom 找到這份作業的評分量表</strong>
+            <p className="muted" style={{ margin: "4px 0 0" }}>
+              你在 Classroom 網頁設定過（共 {classroomRubric.rubricItems.length} 個評分項目，總分{" "}
+              {classroomRubric.maxPoints} 分），可以直接套用，不用在這裡重打一次。
+            </p>
+          </div>
+          <div className="button-row">
+            <button type="button" className="primary small" onClick={applyClassroomRubric}>
+              使用這份量表
+            </button>
+            <button type="button" className="ghost small" onClick={() => setClassroomRubricDismissed(true)}>
+              不用，我自己設定
+            </button>
+          </div>
+        </div>
+      )}
       <h2 className="form-step">
         <span className="section-index">1</span>選一種評分方式
       </h2>

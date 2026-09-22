@@ -21,6 +21,7 @@ interface Submission {
   ai_raw_json: string | null;
   locked: number | null;
   confidence_flags: string | null;
+  risk_level: "green" | "yellow" | "red" | null;
   attachments_json: string | null;
   turned_in_at: number | null; // 學生最後一次繳交時間（unix 秒）
   grade_updated_at: number | null; // 分數最後一次變動時間
@@ -107,6 +108,7 @@ export default function Grading() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
   // 今天還能讓 AI 評幾份（所有老師共用一把 AI 金鑰，每人每天有上限）
   const [remaining, setRemaining] = useState<number | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -193,6 +195,26 @@ export default function Grading() {
     }
   }
 
+  // 登分助手：Classroom API 技術上不能寫回老師手動建立的作業（Google 的權限設計，見進度.md），
+  // 所以不做自動寫回，改把已經有分數的學生整理成「姓名 + 分數」貼進剪貼簿，
+  // 順序跟這頁一致，老師到 Classroom 成績簿貼上去比對著填，比逐一切換視窗手抄快很多。
+  async function copyAllGrades() {
+    const graded = list.filter((s) => s.final_score != null && (s.status === "ai_suggested" || s.status === "teacher_edited" || s.status === "confirmed"));
+    const text = graded.map((s) => `${s.student_name}\t${s.final_score}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+  }
+
   function markBusy(id: string, on: boolean) {
     setBusyIds((prev) => {
       const next = new Set(prev);
@@ -212,7 +234,7 @@ export default function Grading() {
   async function gradeOne(s: Submission, force = false) {
     markBusy(s.id, true);
     try {
-      const { grade, model, confidenceFlags, remainingToday } = await api.aiGrade(s.id, force);
+      const { grade, model, confidenceFlags, riskLevel, remainingToday } = await api.aiGrade(s.id, force);
       setRemaining(remainingToday);
       // 後端已經回傳這位學生的完整結果，直接合併進本地狀態就好，不用整班重拉一次
       // （跟後端 ai-grade 路由的 UPSERT 邏輯對齊：final_score/final_feedback 初始值＝AI 建議值）
@@ -229,6 +251,7 @@ export default function Grading() {
                 ai_model: model,
                 ai_raw_json: JSON.stringify(grade),
                 confidence_flags: confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null,
+                risk_level: riskLevel,
                 locked: 0,
               }
             : row
@@ -280,6 +303,11 @@ export default function Grading() {
       done: list.filter((s) => s.status === "confirmed").length,
       failed: list.filter((s) => failures[s.id]).length,
       resubmitted: list.filter(isResubmitted).length,
+      // 三色分流：只算「AI 建議但老師還沒動過」的（ai_suggested）。老師已經改過/確認過的
+      // 不用再標risk——那已經是老師自己的判斷了，不是要老師去看的東西
+      greenCount: list.filter((s) => s.status === "ai_suggested" && s.risk_level === "green").length,
+      yellowCount: list.filter((s) => s.status === "ai_suggested" && s.risk_level === "yellow").length,
+      redCount: list.filter((s) => s.status === "ai_suggested" && s.risk_level === "red").length,
     }),
     [list, failures]
   );
@@ -377,6 +405,13 @@ export default function Grading() {
           <div className="progress">
             <div className="progress-fill" style={{ width: `${percent}%` }} />
           </div>
+          {counts.review > 0 && (
+            <div className="risk-summary" aria-label="AI 評分結果的三色分流">
+              <span className="risk-chip risk-green">🟢 {counts.greenCount} 可直接確認</span>
+              <span className="risk-chip risk-yellow">🟡 {counts.yellowCount} 建議看一下</span>
+              <span className="risk-chip risk-red">🔴 {counts.redCount} 需要確認</span>
+            </div>
+          )}
         </div>
         <div className="row toolbar-actions">
           {ungraded.length > 0 && (
@@ -399,6 +434,11 @@ export default function Grading() {
           {list.length > 0 && courseWorkId && (
             <button className="secondary" onClick={downloadGrades} disabled={downloading || !!batch}>
               {downloading ? "準備檔案中…" : "下載成績表（Excel）"}
+            </button>
+          )}
+          {counts.review + counts.done > 0 && (
+            <button className="secondary" onClick={copyAllGrades}>
+              {copiedAll ? "已複製，貼到 Classroom 成績簿吧" : "複製全班分數"}
             </button>
           )}
         </div>
@@ -675,6 +715,15 @@ function SubmissionCard({
             ? { cls: "todo", label: "還沒評分" }
             : { cls: "waiting", label: "還沒繳交" };
 
+  // 三色分流：老師還沒動過的 AI 建議才標，老師已經改過/確認過的不用再標（那已經是老師的判斷了）
+  const RISK_BADGE: Record<"green" | "yellow" | "red", { cls: string; label: string }> = {
+    green: { cls: "risk-green", label: "🟢 可直接確認" },
+    yellow: { cls: "risk-yellow", label: "🟡 建議看一下" },
+    red: { cls: "risk-red", label: "🔴 需要確認" },
+  };
+  const riskBadge =
+    submission.status === "ai_suggested" && submission.risk_level ? RISK_BADGE[submission.risk_level] : null;
+
   // 已完成的卡片收成一行，全班頁面才不會越改越長
   if (confirmed && !expanded) {
     return (
@@ -682,6 +731,7 @@ function SubmissionCard({
         <div className="collapsed-row">
           <span className="muted collapsed-position">{position}</span>
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
+          {riskBadge && <span className={`badge ${riskBadge.cls}`}>{riskBadge.label}</span>}
           <strong className="student-name">{submission.student_name}</strong>
           <span className="score-pill">
             {savedScoreText} ／ {maxPoints}
@@ -704,6 +754,7 @@ function SubmissionCard({
         <div className="row">
           <strong className="student-name">{submission.student_name}</strong>
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
+          {riskBadge && <span className={`badge ${riskBadge.cls}`}>{riskBadge.label}</span>}
         </div>
         <div className="row nav-mini">
           <span className="muted">{position}</span>
@@ -764,7 +815,13 @@ function SubmissionCard({
             <div className="result-box-hint">自己打分：填好分數和評語，按「完成批改」就算數。</div>
           )}
           {submission.status === "ai_suggested" && (
-            <div className="result-box-hint">這是 AI 的建議，看過沒問題就按「完成批改」，要改直接改。</div>
+            <div className="result-box-hint">
+              {riskBadge?.cls === "risk-green" && "各評分項目判斷都很穩定，這份可以直接採用，看過沒問題就按「完成批改」。"}
+              {riskBadge?.cls === "risk-yellow" &&
+                "這份分數落在比較極端的區間，或這份評分標準還沒有累積校準紀錄，建議多看一眼再確認。"}
+              {(!riskBadge || riskBadge.cls === "risk-red") &&
+                "這是 AI 的建議，看過沒問題就按「完成批改」，要改直接改。"}
+            </div>
           )}
           {confidenceFlags.length > 0 && (
             <div className="confidence-warning" role="alert">

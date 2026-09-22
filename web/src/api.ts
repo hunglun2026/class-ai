@@ -103,6 +103,12 @@ export const api = {
     ),
   saveRubric: (body: object) => request<{ id: string }>("/api/rubrics", { method: "POST", body: JSON.stringify(body) }),
 
+  // 讀老師在 Classroom 網頁已經設定好的評分量表（不存檔，純預覽，老師按「使用這份量表」才會存）
+  getClassroomRubric: (courseWorkId: string) =>
+    request<{ rubric: { rubricItems: { item: string; maxPoints: number; description?: string }[]; maxPoints: number } | null }>(
+      `/api/rubrics/${courseWorkId}/classroom`
+    ),
+
   // 重的：真的去打 Classroom API 拉最新繳交＋全班名冊，只在老師按「拉取最新繳交」時呼叫
   syncSubmissions: (courseId: string, courseWorkId: string) =>
     request<{ submissions: any[] }>(`/api/submissions/${courseId}/${courseWorkId}/sync`, { method: "POST" }),
@@ -115,6 +121,7 @@ export const api = {
       grade: { score: number; feedback: string; itemScores?: { item: string; score: number; comment: string }[] };
       model: string;
       confidenceFlags: string[];
+      riskLevel: "green" | "yellow" | "red";
       remainingToday: number;
     }>(`/api/submissions/${submissionId}/ai-grade${force ? "?force=1" : ""}`, { method: "POST" }),
   // 今天還可以讓 AI 評幾份（每位老師各自計算）

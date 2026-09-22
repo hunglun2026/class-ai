@@ -7,7 +7,7 @@ import { listStudentSubmissions, listStudentsMap, lastTurnedInAt } from "../lib/
 import { extractDriveFile, type ExtractedAttachment } from "../lib/drive";
 import { bytesToBase64 } from "../lib/base64";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
-import { computeConfidenceFlags, injectionFlag } from "../lib/confidence";
+import { computeConfidenceFlags, injectionFlag, computeRiskLevel } from "../lib/confidence";
 import { checkAiQuota, recordAiUse } from "../lib/usage";
 import { fetchCalibrationExamples, isMeaningfulEdit, saveCalibrationExample } from "../lib/calibration";
 import * as XLSX from "@e965/xlsx";
@@ -29,7 +29,7 @@ interface AttachmentRecord {
 const MAX_TOTAL_INLINE_BYTES = 20 * 1024 * 1024;
 
 const SUBMISSIONS_SELECT = `
-  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags,
+  SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags, g.risk_level,
     g.updated_at AS grade_updated_at
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
@@ -42,7 +42,10 @@ async function logGradeHistory(
   source: "AI_INITIAL" | "AI_REGRADE" | "TEACHER_EDIT" | "TEACHER_CONFIRM" | "TEACHER_REOPEN",
   score: number | null,
   feedback: string | null,
-  now: number
+  now: number,
+  // 只有 AI_INITIAL/AI_REGRADE 會帶：這次 AI 當下怎麼判斷的快照，之後老師改分不會回頭改寫這兩欄
+  aiReasoning: unknown = null,
+  riskSignal: unknown = null
 ): Promise<void> {
   const countRow = await db
     .prepare("SELECT COUNT(*) AS n FROM grade_history WHERE submission_id = ?")
@@ -50,10 +53,20 @@ async function logGradeHistory(
     .first<{ n: number }>();
   await db
     .prepare(
-      `INSERT INTO grade_history (id, submission_id, version_number, source, score, feedback, changed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO grade_history (id, submission_id, version_number, source, score, feedback, changed_at, ai_reasoning, risk_signal)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(crypto.randomUUID(), submissionId, (countRow?.n ?? 0) + 1, source, score, feedback, now)
+    .bind(
+      crypto.randomUUID(),
+      submissionId,
+      (countRow?.n ?? 0) + 1,
+      source,
+      score,
+      feedback,
+      now,
+      aiReasoning ? JSON.stringify(aiReasoning) : null,
+      riskSignal ? JSON.stringify(riskSignal) : null
+    )
     .run();
 }
 
@@ -265,13 +278,16 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
       confidenceFlags.push(`有 ${unreadable.length} 個附件 AI 讀不到（${unreadable.join("、")}），這個分數沒有看過這些檔案`);
     }
     const confidenceFlagsJson = confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null;
+    // 三色分流：見 lib/confidence.ts computeRiskLevel 的說明（不额外多打AI，用已經有的證據組合）
+    const riskLevel = computeRiskLevel(confidenceFlags, result.score, rubric.maxPoints, examples.length > 0);
 
     await c.env.DB.prepare(
-      `INSERT INTO grades (id, submission_id, rubric_id, ai_score, ai_feedback, ai_raw_json, ai_model, confidence_flags, final_score, final_feedback, status, graded_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai_suggested', ?, ?)
+      `INSERT INTO grades (id, submission_id, rubric_id, ai_score, ai_feedback, ai_raw_json, ai_model, confidence_flags, risk_level, final_score, final_feedback, status, graded_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai_suggested', ?, ?)
        ON CONFLICT(submission_id) DO UPDATE SET
          rubric_id = excluded.rubric_id, ai_score = excluded.ai_score, ai_feedback = excluded.ai_feedback,
          ai_raw_json = excluded.ai_raw_json, ai_model = excluded.ai_model, confidence_flags = excluded.confidence_flags,
+         risk_level = excluded.risk_level,
          final_score = excluded.ai_score, final_feedback = excluded.ai_feedback,
          status = 'ai_suggested', graded_at = excluded.graded_at, updated_at = excluded.updated_at`
     )
@@ -284,6 +300,7 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
         JSON.stringify(result),
         model,
         confidenceFlagsJson,
+        riskLevel,
         result.score,
         result.feedback,
         now,
@@ -297,10 +314,12 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
       existingGrade ? "AI_REGRADE" : "AI_INITIAL",
       result.score,
       result.feedback,
-      now
+      now,
+      { itemScores: result.itemScores ?? null, feedback: result.feedback },
+      { level: riskLevel, flags: confidenceFlags }
     );
 
-    return c.json({ grade: result, model, confidenceFlags, remainingToday });
+    return c.json({ grade: result, model, confidenceFlags, riskLevel, remainingToday });
   } catch (e) {
     console.error("[ai-grade]", e);
     const kind: GradeFailKind = e instanceof GradeError ? e.kind : "unknown";

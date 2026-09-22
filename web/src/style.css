@@ -360,6 +360,20 @@ textarea:focus, input:focus, select:focus {
 .chip:hover:not(:disabled) { background: #fff; border-color: var(--accent); }
 
 .my-templates-bar { margin-bottom: 10px; }
+
+.classroom-rubric-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.classroom-rubric-banner .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip-with-delete { display: inline-flex; align-items: center; gap: 2px; }
 .chip-with-delete .icon-btn.small { width: 32px; min-height: 32px; color: #94a3b8; }
 
@@ -471,6 +485,22 @@ textarea:focus, input:focus, select:focus {
 .badge.failed { background: var(--st-fail-bg); color: var(--st-fail); }
 .badge.busy { background: var(--brand-soft); color: var(--brand); }
 .badge.waiting { background: transparent; color: var(--ink-soft); border: 1px dashed var(--line); }
+.badge.risk-green { background: #dcfce7; color: #15803d; }
+.badge.risk-yellow { background: #fef3c7; color: #92400e; }
+.badge.risk-red { background: #fee2e2; color: #b91c1c; }
+
+.risk-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.risk-chip {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.risk-chip.risk-green { background: #dcfce7; color: #15803d; }
+.risk-chip.risk-yellow { background: #fef3c7; color: #92400e; }
+.risk-chip.risk-red { background: #fee2e2; color: #b91c1c; }
 
 .submission-card { scroll-margin-top: 80px; border-left: 5px solid #cbd5e1; }
 .submission-card.status-review { border-left-color: #f59e0b; }

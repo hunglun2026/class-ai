@@ -6,6 +6,8 @@ import { ownsCourseWork } from "../lib/ownership";
 import { extractExcelText } from "../lib/excel";
 import { extractDocxText } from "../lib/docx";
 import { base64ToBytes } from "../lib/base64";
+import { getClassroomRubric, classroomRubricToItems } from "../lib/classroom";
+import { getValidAccessToken } from "../lib/tokens";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
@@ -98,6 +100,28 @@ rubricRoutes.get("/:courseWorkId", async (c) => {
         : null,
     },
   });
+});
+
+// 讀老師在 Classroom 網頁已經設定好的量表（不存進 D1，純預覽；老師確認後才會呼叫下面的 POST 存檔）。
+// 找不到／讀不到都回 { rubric: null }，前端據此顯示「沒有找到 Classroom 量表」而不是報錯。
+rubricRoutes.get("/:courseWorkId/classroom", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  const cw = await c.env.DB.prepare("SELECT course_id, max_points FROM coursework WHERE id = ?")
+    .bind(courseWorkId)
+    .first<{ course_id: string; max_points: number | null }>();
+  if (!cw) return c.json({ rubric: null });
+
+  const accessToken = await getValidAccessToken(c.env, teacherId);
+  const classroomRubric = await getClassroomRubric(accessToken, cw.course_id, courseWorkId);
+  if (!classroomRubric) return c.json({ rubric: null });
+
+  const rubricItems = classroomRubricToItems(classroomRubric);
+  const maxPoints = rubricItems.reduce((sum, it) => sum + it.maxPoints, 0);
+  return c.json({ rubric: { rubricItems, maxPoints } });
 });
 
 rubricRoutes.post("/", async (c) => {
