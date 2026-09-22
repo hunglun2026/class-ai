@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env, Variables } from "../types";
 import { requireAuth } from "../middleware";
+import { CALIBRATION_EDIT_THRESHOLD } from "../lib/calibration";
 
 export const calibrationRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 calibrationRoutes.use("*", requireAuth);
@@ -18,7 +19,7 @@ calibrationRoutes.get("/summary", async (c) => {
     return c.json({ total: 0, editRatePercent: null, avgScoreDiffPercent: null, byMode: {} });
   }
 
-  const EDIT_THRESHOLD = 0.15; // 分差超過總分15%才算「老師真的改過」，避免把±1分的微調也算進去
+  const EDIT_THRESHOLD = CALIBRATION_EDIT_THRESHOLD;
   let edited = 0;
   let diffPercentSum = 0;
   const byMode: Record<string, { total: number; edited: number }> = {};

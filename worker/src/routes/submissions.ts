@@ -9,6 +9,7 @@ import { bytesToBase64 } from "../lib/base64";
 import { gradeSubmission, GradeError, type GradeFailKind } from "../lib/gemini";
 import { computeConfidenceFlags, injectionFlag } from "../lib/confidence";
 import { checkAiQuota, recordAiUse } from "../lib/usage";
+import { fetchCalibrationExamples, isMeaningfulEdit, saveCalibrationExample } from "../lib/calibration";
 import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork } from "../lib/ownership";
 
@@ -242,7 +243,8 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
   }
 
   try {
-    const { result, model } = await gradeSubmission(c.env.GEMINI_API_KEY, rubric, submission.content_text ?? "", extracted);
+    const examples = await fetchCalibrationExamples(c.env.DB, rubric.id);
+    const { result, model } = await gradeSubmission(c.env.GEMINI_API_KEY, rubric, submission.content_text ?? "", extracted, examples);
     // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數
     const remainingToday = await recordAiUse(c.env, teacherId);
     const now = Math.floor(Date.now() / 1000);
@@ -429,13 +431,20 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
   if (body.confirm) {
     try {
       const calib = await c.env.DB.prepare(
-        `SELECT g.ai_score, r.mode, r.max_points FROM grades g
+        `SELECT g.ai_score, g.ai_feedback, g.rubric_id, r.mode, r.max_points, s.content_text FROM grades g
          JOIN submissions s ON s.id = g.submission_id
          JOIN rubrics r ON r.coursework_id = s.coursework_id
          WHERE g.submission_id = ?`
       )
         .bind(submissionId)
-        .first<{ ai_score: number | null; mode: string; max_points: number }>();
+        .first<{
+          ai_score: number | null;
+          ai_feedback: string | null;
+          rubric_id: string | null;
+          mode: string;
+          max_points: number;
+          content_text: string | null;
+        }>();
       if (calib && calib.ai_score != null) {
         await c.env.DB.prepare(
           `INSERT INTO grading_calibration_logs (id, mode, max_points, ai_score, teacher_final_score, created_at)
@@ -443,6 +452,19 @@ submissionRoutes.patch("/:submissionId/grade", async (c) => {
         )
           .bind(crypto.randomUUID(), calib.mode, calib.max_points, calib.ai_score, body.finalScore, now)
           .run();
+
+        // 只有老師真的改過分數（不是單純按確認）才值得存成這份評分標準的校準範例
+        if (calib.rubric_id && calib.content_text && isMeaningfulEdit(calib.ai_score, body.finalScore, calib.max_points)) {
+          await saveCalibrationExample(c.env.DB, {
+            rubricId: calib.rubric_id,
+            studentContent: calib.content_text,
+            aiScore: calib.ai_score,
+            aiFeedback: calib.ai_feedback,
+            teacherFinalScore: body.finalScore,
+            teacherFinalFeedback: body.finalFeedback,
+            now,
+          });
+        }
       }
     } catch (e) {
       console.error("[grading_calibration_logs] 記錄失敗（不影響這次確認）", e);

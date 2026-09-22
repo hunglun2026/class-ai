@@ -747,6 +747,68 @@ console.log("\n== 八、AI 用量上限（v1.11.0） ==");
   await setUsed("t1", 0);
 }
 
+console.log("\n== 九、評分標準校準範例（rubric_calibration_examples，v1.14.0） ==");
+{
+  const { taipeiDay } = await import("../src/lib/usage.ts");
+  const today = taipeiDay();
+  await env.DB.prepare(
+    "INSERT INTO ai_usage (teacher_id, day, used, updated_at) VALUES ('t1', ?, 0, 0) ON CONFLICT(teacher_id, day) DO UPDATE SET used = excluded.used"
+  )
+    .bind(today)
+    .run();
+  await env.SESSIONS.delete(`ratelimit:t1:${Math.floor(Date.now() / 60000)}`);
+
+  const rubricRowNow: any = await env.DB.prepare("SELECT id FROM rubrics WHERE coursework_id = 'w1'").first();
+  const rubricId = rubricRowNow.id;
+  await env.DB.prepare("DELETE FROM rubric_calibration_examples WHERE rubric_id = ?").bind(rubricId).run();
+
+  const sA = await newSubmission("學生作答A：光合作用需要陽光、水和二氧化碳。", []);
+  const gA = await call("POST", `/api/submissions/${sA}/ai-grade`); // 假 Gemini 固定回 7 分
+  check("9-0 AI 評分成功（前置）", gA.status === 200, gA.text.slice(0, 100));
+  const confA = await call("PATCH", `/api/submissions/${sA}/grade`, { finalScore: 1, finalFeedback: "答得不完整", confirm: true });
+  check("9-1 老師大幅改分後確認：回 200", confA.status === 200, confA.text.slice(0, 100));
+
+  const rows1: any = await env.DB.prepare("SELECT * FROM rubric_calibration_examples WHERE rubric_id = ?").bind(rubricId).all();
+  check("9-2 存了一筆校準範例", rows1.results.length === 1, JSON.stringify(rows1.results));
+  const ex1: any = rows1.results[0];
+  check(
+    "9-3 範例內容對：學生節錄、AI建議分、老師定案分都存對",
+    ex1.student_excerpt.includes("光合作用") && ex1.ai_score === 7 && ex1.teacher_final_score === 1 && ex1.teacher_final_feedback === "答得不完整",
+    JSON.stringify(ex1)
+  );
+
+  const sB = await newSubmission("學生作答B：普通答案", []);
+  await call("POST", `/api/submissions/${sB}/ai-grade`);
+  await call("PATCH", `/api/submissions/${sB}/grade`, { finalScore: 7.3, finalFeedback: "微調", confirm: true }); // 差距 0.3/10=3%，在門檻內
+  const countAfterSmallEdit: any = await env.DB.prepare("SELECT COUNT(*) n FROM rubric_calibration_examples WHERE rubric_id = ?").bind(rubricId).first();
+  check("9-4 分差在門檻內（≤15%）不存範例", countAfterSmallEdit.n === 1, JSON.stringify(countAfterSmallEdit));
+
+  geminiCalls = [];
+  const sC = await newSubmission("學生作答C：植物利用光合作用產生氧氣", []);
+  await call("POST", `/api/submissions/${sC}/ai-grade`);
+  const lastCall = geminiCalls[geminiCalls.length - 1];
+  const sysText = (lastCall?.systemInstruction?.parts ?? []).map((p: any) => p.text).join("\n");
+  check(
+    "9-5 評分 prompt 帶到校準參考段落",
+    sysText.includes("校準參考") && sysText.includes("光合作用") && sysText.includes("答得不完整"),
+    sysText.slice(0, 500)
+  );
+
+  const firstExampleId = ex1.id;
+  for (let i = 0; i < 8; i++) {
+    const s = await newSubmission(`學生作答補${i}：內容${i}`, []);
+    await call("POST", `/api/submissions/${s}/ai-grade`);
+    await call("PATCH", `/api/submissions/${s}/grade`, { finalScore: 0, finalFeedback: `修正${i}`, confirm: true });
+  }
+  const rowsFinal: any = await env.DB.prepare("SELECT id FROM rubric_calibration_examples WHERE rubric_id = ? ORDER BY created_at ASC").bind(rubricId).all();
+  check("9-6 範例數量不超過上限（8筆）", rowsFinal.results.length === 8, `${rowsFinal.results.length}`);
+  check(
+    "9-7 超過上限後，最舊的第一筆被刪掉",
+    !rowsFinal.results.some((r: any) => r.id === firstExampleId),
+    JSON.stringify(rowsFinal.results.map((r: any) => r.id))
+  );
+}
+
 if (process.env.REAL_GEMINI === "1") {
   console.log("\n== 三、真的打 Gemini（PDF 答案檔在 R2 ＋ 學生交手寫照片） ==");
   geminiMode = "real";

@@ -90,7 +90,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function grade(c: Case, model: string) {
   for (let i = 0; i < 4; i++) {
     try {
-      return await (gradeSubmission as any)(KEY, c.rubric, c.text, c.atts ?? [], [model]);
+      return await (gradeSubmission as any)(KEY, c.rubric, c.text, c.atts ?? [], [], [model]);
     } catch (e) {
       const msg = String((e as Error).message);
       if (!/429|RESOURCE_EXHAUSTED|503|沒有回應/.test(msg) || i === 3) throw e;

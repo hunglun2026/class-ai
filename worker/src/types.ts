@@ -37,6 +37,14 @@ export interface RubricItem {
   description?: string;
 }
 
+// 同一份評分標準過去被老師修正過的紀錄，評分時當參考範例拿捏鬆緊（見 lib/calibration.ts）
+export interface CalibrationExample {
+  studentExcerpt: string;
+  aiScore: number;
+  teacherFinalScore: number;
+  teacherFinalFeedback: string | null;
+}
+
 export interface AiGradeResult {
   score: number;
   feedback: string;
