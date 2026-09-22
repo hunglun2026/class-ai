@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import type { Env, Variables } from "./types";
 import { authRoutes } from "./routes/auth";
 import { courseRoutes } from "./routes/courses";
@@ -11,6 +12,7 @@ import { usageRoutes } from "./routes/usage";
 import { GoogleAuthExpiredError } from "./lib/google-oauth";
 import { ZodError } from "zod";
 import { ClassroomError } from "./lib/classroom";
+import { mcpAuthRoutes, mcpApiApp } from "./mcp-auth";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -37,6 +39,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
+app.route("/oauth", mcpAuthRoutes); // /oauth/authorize、/oauth/callback；/mcp 本身走下面 OAuthProvider 的 apiHandler
 app.route("/api/auth", authRoutes);
 app.route("/api/courses", courseRoutes);
 app.route("/api/rubrics", rubricRoutes);
@@ -81,4 +84,14 @@ app.onError((err, c) => {
   return c.json({ error: "系統暫時發生問題，請稍後再試" }, 500);
 });
 
-export default app;
+// OAuthProvider 包住整支 app：/mcp 這條路先驗證 Bearer token 才交給 mcpApiApp，
+// 其餘路徑（含 /oauth/authorize、/oauth/callback）原樣交給 app 處理，行為跟包之前一樣。
+export default new OAuthProvider<Env>({
+  apiRoute: "/mcp",
+  apiHandler: mcpApiApp,
+  defaultHandler: app,
+  authorizeEndpoint: "/oauth/authorize",
+  tokenEndpoint: "/oauth/token",
+  clientRegistrationEndpoint: "/oauth/register",
+  scopesSupported: ["classai:read"],
+});
