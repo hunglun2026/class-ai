@@ -1,4 +1,4 @@
 GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=xxx
-GEMINI_API_KEY=xxx
+GEMINI_API_KEYS=xxx1,xxx2,xxx3
 SESSION_SECRET=用一串隨機字串，例如 openssl rand -hex 32

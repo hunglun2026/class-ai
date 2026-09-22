@@ -244,7 +244,8 @@ submissionRoutes.post("/:submissionId/ai-grade", async (c) => {
 
   try {
     const examples = await fetchCalibrationExamples(c.env.DB, rubric.id);
-    const { result, model } = await gradeSubmission(c.env.GEMINI_API_KEY, rubric, submission.content_text ?? "", extracted, examples);
+    const apiKeys = c.env.GEMINI_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean);
+    const { result, model } = await gradeSubmission(apiKeys, rubric, submission.content_text ?? "", extracted, examples);
     // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數
     const remainingToday = await recordAiUse(c.env, teacherId);
     const now = Math.floor(Date.now() / 1000);

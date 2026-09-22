@@ -1,6 +1,6 @@
 /**
  * 提示詞注入攻擊測試：學生在作答裡對 AI 下指令（要求給滿分），分數不能被改變，老師要看到警示。
- * 會真的打 Gemini（用 worker/.dev.vars 的 GEMINI_API_KEY，或環境變數 TEST_GEMINI_KEY），會用到額度。
+ * 會真的打 Gemini（用 worker/.dev.vars 的 GEMINI_API_KEYS 第一把，或環境變數 TEST_GEMINI_KEY），會用到額度。
  *
  * 跑法（在 worker/ 底下）：npm run test:injection
  *   MODELS=gemini-flash-lite-latest,gemini-flash-latest 指定要測哪些模型（預設這兩個，逐一單獨測）
@@ -18,7 +18,7 @@ const devVars = Object.fromEntries(
     .filter((l) => l.includes("=") && !l.startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()])
 );
-const KEY = process.env.TEST_GEMINI_KEY || devVars.GEMINI_API_KEY;
+const KEY = process.env.TEST_GEMINI_KEY || devVars.GEMINI_API_KEYS?.split(",")[0]?.trim();
 const MODELS = (process.env.MODELS || "gemini-flash-lite-latest,gemini-flash-latest").split(",");
 const BASELINE = process.env.BASELINE === "1";
 const fx = (n: string) => readFileSync(`test/fixtures/${n}`).toString("base64");
@@ -90,7 +90,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function grade(c: Case, model: string) {
   for (let i = 0; i < 4; i++) {
     try {
-      return await (gradeSubmission as any)(KEY, c.rubric, c.text, c.atts ?? [], [], [model]);
+      return await (gradeSubmission as any)([KEY], c.rubric, c.text, c.atts ?? [], [], [model]);
     } catch (e) {
       const msg = String((e as Error).message);
       if (!/429|RESOURCE_EXHAUSTED|503|沒有回應/.test(msg) || i === 3) throw e;

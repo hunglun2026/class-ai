@@ -187,14 +187,19 @@ async function callGemini(
   return parsed;
 }
 
+// 多把 key 輪流當起點分散負載（同一個 isolate 內累加，不用追求嚴格公平，夠用就好）；
+// 額度錯誤（429）才換下一把 key，其他錯誤（逾時、安全過濾）換 key 沒有用，直接換下一層模型。
+let keyRotation = 0;
+
 export async function gradeSubmission(
-  apiKey: string,
+  apiKeys: string[],
   rubric: Rubric,
   studentText: string,
   attachments: ExtractedAttachment[],
   examples: CalibrationExample[] = [],
   models: string[] = MODELS
 ): Promise<{ result: AiGradeResult; model: string }> {
+  if (apiKeys.length === 0) throw new GradeError("unknown", "沒有設定任何 Gemini API key");
   const answerKeyAttachment: ExtractedAttachment | null = rubric.answerKeyFile
     ? rubric.answerKeyFile.extractedText
       ? { name: rubric.answerKeyFile.name, kind: "text", text: rubric.answerKeyFile.extractedText }
@@ -205,16 +210,22 @@ export async function gradeSubmission(
           mimeType: rubric.answerKeyFile.mimeType,
         }
     : null;
+  const startIdx = keyRotation++ % apiKeys.length;
   const errors: string[] = [];
   for (const model of models) {
-    try {
-      const result = await callGemini(apiKey, model, rubric, studentText, attachments, answerKeyAttachment, examples);
-      return { result, model };
-    } catch (e) {
-      errors.push((e as Error).message);
+    for (let i = 0; i < apiKeys.length; i++) {
+      const apiKey = apiKeys[(startIdx + i) % apiKeys.length];
+      try {
+        const result = await callGemini(apiKey, model, rubric, studentText, attachments, answerKeyAttachment, examples);
+        return { result, model };
+      } catch (e) {
+        const msg = (e as Error).message;
+        errors.push(msg);
+        if (classify(msg) !== "quota") break; // 不是額度問題，換 key 也一樣會失敗，直接換模型
+      }
     }
   }
-  // 三層都失敗時，只要有任一層是額度問題就算額度（最常見、老師最該知道的原因）
+  // 全部都失敗時，只要有任一層是額度問題就算額度（最常見、老師最該知道的原因）
   const kinds = errors.map(classify);
   const kind = kinds.includes("quota") ? "quota" : kinds[kinds.length - 1] ?? "unknown";
   throw new GradeError(kind, `所有模型都評分失敗：${errors.join(" | ")}`);
