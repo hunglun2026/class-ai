@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, ApiError } from "../api";
+import { api, ApiError, type InboxItem } from "../api";
 import Stepper from "../components/Stepper";
 
 interface Course {
@@ -8,6 +8,80 @@ interface Course {
   name: string;
   section?: string;
   teacherCount?: number;
+}
+
+function agoText(sec: number | null): string {
+  if (!sec) return "";
+  const min = Math.max(0, Math.round((Date.now() / 1000 - sec) / 60));
+  if (min < 1) return "剛剛更新";
+  if (min < 60) return `${min} 分鐘前更新`;
+  return `${Math.round(min / 60)} 小時前更新`;
+}
+
+// 首頁「等你確認」（v1.17.0）：classAI 在背景已經幫忙批好的作業，點進去直接確認。
+// 讀不到或沒有東西就整塊不顯示，不擋原本「選課→選作業」的流程
+function InboxPanel({ onRelogin }: { onRelogin: () => void }) {
+  const [items, setItems] = useState<InboxItem[]>([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    api
+      .inbox()
+      .then((r) => setItems(r.items))
+      .catch(() => setItems([]));
+  }, []);
+
+  if (!items.length) return null;
+  const authLost = items.some((i) => i.lastError === "auth_expired");
+
+  return (
+    <section className="inbox-panel" aria-label="等你確認">
+      <h2 className="inbox-title">等你確認</h2>
+      <p className="muted inbox-sub">學生交了作業，classAI 會自己去 Classroom 拿來先評好，你只要看過、按確認。</p>
+      {authLost && (
+        <div className="error-text error-box" role="alert">
+          <span>Google 授權過期了，classAI 暫時沒辦法幫你先批，請重新登入一次</span>
+          <button className="secondary small" onClick={onRelogin}>
+            重新登入
+          </button>
+        </div>
+      )}
+      <div className="pick-list">
+        {items.map((it) => (
+          <button
+            key={it.courseWorkId}
+            className="pick-card"
+            onClick={() =>
+              navigate(`/courses/${it.courseId}/coursework/${it.courseWorkId}`, {
+                state: { title: it.title, maxPoints: it.maxPoints ?? undefined, courseName: it.courseName },
+              })
+            }
+          >
+            <span className="pick-icon doc" aria-hidden="true">
+              ✅
+            </span>
+            <span className="pick-body">
+              <strong>{it.title}</strong>
+              <span className="muted">
+                {it.courseName}
+                {it.autoSyncedAt ? `｜${agoText(it.autoSyncedAt)}` : ""}
+              </span>
+              <span className="risk-summary">
+                {it.green > 0 && <span className="badge risk-green">🟢 {it.green} 位可直接確認</span>}
+                {it.yellow > 0 && <span className="badge risk-yellow">🟡 {it.yellow} 位建議看一下</span>}
+                {it.red > 0 && <span className="badge risk-red">🔴 {it.red} 位需要確認</span>}
+                {it.needsTeacher > 0 && <span className="badge failed">✋ {it.needsTeacher} 位要你自己批</span>}
+                {it.resubmitted > 0 && <span className="badge review">🔄 {it.resubmitted} 位學生重交</span>}
+              </span>
+            </span>
+            <span className="pick-arrow" aria-hidden="true">
+              ›
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 const INTRO_DISMISSED_KEY = "classai_intro_dismissed";
@@ -83,6 +157,8 @@ export default function Courses() {
           <p className="intro-note">分數不會自動送回 Classroom，改好後用「複製」或下載 Excel 自己登記。</p>
         </div>
       )}
+
+      <InboxPanel onRelogin={switchAccount} />
 
       <div className="page-head">
         <div className="eyebrow">第 1 步</div>

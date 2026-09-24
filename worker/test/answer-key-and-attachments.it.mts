@@ -831,6 +831,138 @@ if (process.env.REAL_GEMINI === "1") {
   }
 }
 
+console.log("\n== 十、背景自動預批改（v1.17.0） ==");
+{
+  const { runAutoGrade, MAX_ATTEMPTS } = await import("../src/lib/autograde.ts");
+  // 額度放寬，免得前面各段在同一分鐘用掉的次數干擾這段（額度本身另外測 10-11）
+  const e10: any = { ...env, DAILY_AI_LIMIT: "1000", MINUTE_AI_LIMIT: "1000" };
+  const t = () => Math.floor(Date.now() / 1000);
+  const hist = (sec: number) => [{ stateHistory: { state: "TURNED_IN", stateTimestamp: new Date(sec * 1000).toISOString() } }];
+  const grade = (id: string) => env.DB.prepare("SELECT status, ai_score, final_score, locked FROM grades WHERE submission_id = ?").bind(id).first();
+  const sub = (id: string) => env.DB.prepare("SELECT autograde_error, autograde_attempts FROM submissions WHERE id = ?").bind(id).first();
+
+  // 前面各段存評分標準時已經登記過接手，先全部停掉，只看這段自己的作業
+  const w1Watched = await env.DB.prepare("SELECT 1 FROM autograde_watch WHERE coursework_id = 'w1'").first();
+  check("10-0 存評分標準就會登記背景接手", !!w1Watched);
+  await env.DB.prepare("UPDATE autograde_watch SET watch_until = 0").run();
+
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO coursework VALUES ('w3','c1','光合作用短答',NULL,10,?)").bind(t()),
+    env.DB.prepare(
+      "INSERT INTO rubrics (id, coursework_id, mode, instructions, max_points, created_at, updated_at) VALUES ('r3','w3','freetext','看有沒有講到光能轉化學能',10,?,?)"
+    ).bind(t(), t()),
+  ]);
+  // 老師二在第六段已經是 c1 的協同老師；老師三（第六段建的）不是這門課的老師
+  const watchRes = await call("POST", "/api/submissions/w3/watch");
+  const otherWatch = await call("POST", "/api/submissions/w3/watch", undefined, "s-t3");
+  check("10-1 打開批改頁登記接手；別班老師不行", watchRes.status === 200 && otherWatch.status === 404, `${watchRes.status}/${otherWatch.status}`);
+
+  classroomSubs = [
+    { id: "ag-a", userId: "cu1", state: "TURNED_IN", shortAnswerSubmission: { answer: "植物把光能轉成化學能" }, submissionHistory: hist(t() - 1200) },
+    { id: "ag-b", userId: "cu2", state: "TURNED_IN", shortAnswerSubmission: { answer: "剛交的" }, submissionHistory: hist(t() - 180) },
+    { id: "ag-c", userId: "cu3", state: "TURNED_IN", assignmentSubmission: { attachments: [{ link: { url: "https://youtu.be/x", title: "我的影片" } }] }, submissionHistory: hist(t() - 1200) },
+    { id: "ag-n", userId: "cu4", state: "CREATED" },
+  ];
+  geminiCalls = [];
+  let s1 = await runAutoGrade(e10);
+  check("10-2 滿 10 分鐘的評了、剛交 3 分鐘的先不評", (await grade("ag-a"))?.status === "ai_suggested" && !(await grade("ag-b")) && s1.graded === 1, JSON.stringify(s1));
+  const cErr: any = await sub("ag-c");
+  check("10-3 只交連結：標「需要人工批」、沒叫 AI", !!cErr?.autograde_error && geminiCalls.length === 1, `${cErr?.autograde_error} calls=${geminiCalls.length}`);
+
+  geminiCalls = [];
+  await runAutoGrade(e10);
+  check("10-4 再跑一輪：評過的不重評、人工批的不重試", geminiCalls.length === 0, `calls=${geminiCalls.length}`);
+
+  const inbox1 = await call("GET", "/api/inbox");
+  const item = inbox1.json?.items?.find((i: any) => i.courseWorkId === "w3");
+  const inboxOther = await call("GET", "/api/inbox", undefined, "s-t3");
+  check(
+    "10-5 首頁待確認：1 份 AI 建議＋1 份人工批；別的老師看不到",
+    !!item && item.green + item.yellow + item.red === 1 && item.needsTeacher === 1 && !inboxOther.json.items.some((i: any) => i.courseWorkId === "w3"),
+    JSON.stringify(inbox1.json).slice(0, 300)
+  );
+
+  // 學生重交（老師還沒動過 AI 建議）→ 重評
+  await env.DB.prepare("UPDATE grades SET graded_at = ? WHERE submission_id = 'ag-a'").bind(t() - 3600).run();
+  classroomSubs[0] = { ...classroomSubs[0], shortAnswerSubmission: { answer: "改過的答案" }, submissionHistory: hist(t() - 1200) };
+  geminiCalls = [];
+  await runAutoGrade(e10);
+  const hist1 = await env.DB.prepare("SELECT source FROM grade_history WHERE submission_id = 'ag-a' ORDER BY version_number DESC").first<any>();
+  check("10-6 AI 建議還沒被老師動過，學生重交 → 自動重評", geminiCalls.length === 1 && hist1?.source === "AI_REGRADE", `calls=${geminiCalls.length} ${hist1?.source}`);
+
+  // 老師確認鎖定後學生又重交 → 不能被蓋掉
+  await call("PATCH", "/api/submissions/ag-a/grade", { finalScore: 9, finalFeedback: "老師定案", confirm: true });
+  await env.DB.prepare("UPDATE grades SET graded_at = ?, updated_at = ? WHERE submission_id = 'ag-a'").bind(t() - 3600, t() - 3600).run();
+  classroomSubs[0] = { ...classroomSubs[0], shortAnswerSubmission: { answer: "又改了" }, submissionHistory: hist(t() - 900) };
+  geminiCalls = [];
+  await runAutoGrade(e10);
+  const locked: any = await grade("ag-a");
+  const inbox2 = await call("GET", "/api/inbox");
+  const item2 = inbox2.json?.items?.find((i: any) => i.courseWorkId === "w3");
+  check("10-7 老師確認鎖定的，學生重交也不蓋掉，首頁列為「重交」", geminiCalls.length === 0 && locked?.final_score === 9 && locked?.locked === 1 && item2?.resubmitted === 1, JSON.stringify({ locked, item2 }));
+
+  // 只交連結的學生改交文字 → 清掉人工批標記、AI 重新評
+  classroomSubs[2] = { ...classroomSubs[2], assignmentSubmission: undefined, shortAnswerSubmission: { answer: "改成打字回答" }, submissionHistory: hist(t() - 700) };
+  await runAutoGrade(e10);
+  const c2: any = await sub("ag-c");
+  check("10-8 人工批的學生重交 → 標記清掉、AI 重新評", c2?.autograde_error === null && (await grade("ag-c"))?.status === "ai_suggested", JSON.stringify(c2));
+
+  // AI 一直失敗 → 前兩輪留著重試，第三輪標人工批
+  classroomSubs.push({ id: "ag-d", userId: "cu5", state: "TURNED_IN", shortAnswerSubmission: { answer: "失敗測試" }, submissionHistory: hist(t() - 1200) });
+  geminiFails = true;
+  const attemptsSeen: number[] = [];
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    await runAutoGrade(e10);
+    attemptsSeen.push(((await sub("ag-d")) as any)?.autograde_attempts);
+  }
+  geminiFails = false;
+  const d: any = await sub("ag-d");
+  check("10-9 AI 連續失敗 3 次才標人工批", attemptsSeen.join(",") === "1,2,2" && String(d?.autograde_error).includes("連續 3 次"), `${attemptsSeen} ${d?.autograde_error}`);
+
+  // 老師頁面正在評同一位 → 排程不重複叫 AI
+  classroomSubs.push({ id: "ag-e", userId: "cu6", state: "TURNED_IN", shortAnswerSubmission: { answer: "搶鎖測試" }, submissionHistory: hist(t() - 1200) });
+  await env.DB.prepare("INSERT INTO submissions (id, coursework_id, student_id, student_name, state, content_text, attachments_json, fetched_at) VALUES ('ag-e','w3','cu6','學生','TURNED_IN','搶鎖測試','[]',?)").bind(t()).run();
+  await env.SESSIONS.put("grading:ag-e", "1", { expirationTtl: 300 });
+  geminiCalls = [];
+  await runAutoGrade(e10);
+  const e1: any = await sub("ag-e");
+  check("10-10 別處正在評同一位：排程跳過、不叫 AI、不記錯", geminiCalls.length === 0 && !(await grade("ag-e")) && e1?.autograde_error === null);
+  await env.SESSIONS.delete("grading:ag-e");
+
+  // 額度用完 → 排程停手，不記成人工批（明天再試）
+  const used: any = await env.DB.prepare("SELECT used FROM ai_usage WHERE teacher_id = 't1' AND day = ?").bind(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10)).first();
+  geminiCalls = [];
+  await runAutoGrade({ ...env, DAILY_AI_LIMIT: String(used?.used ?? 1), MINUTE_AI_LIMIT: "1000" });
+  const e2: any = await sub("ag-e");
+  check("10-11 額度用完：不叫 AI、也不標人工批", geminiCalls.length === 0 && e2?.autograde_error === null && !(await grade("ag-e")), `calls=${geminiCalls.length}`);
+  await runAutoGrade(e10);
+  check("10-11b 額度恢復後下一輪接著評", (await grade("ag-e"))?.status === "ai_suggested");
+
+  // 老師的 Google 授權失效 → 記下來、首頁提醒；老師打開批改頁就清掉
+  classroomStatus = 401;
+  await runAutoGrade(e10);
+  classroomStatus = 200;
+  const w: any = await env.DB.prepare("SELECT last_error FROM autograde_watch WHERE coursework_id = 'w3'").first();
+  const inbox3 = await call("GET", "/api/inbox");
+  const item3 = inbox3.json?.items?.find((i: any) => i.courseWorkId === "w3");
+  await call("POST", "/api/submissions/w3/watch");
+  const w2: any = await env.DB.prepare("SELECT last_error FROM autograde_watch WHERE coursework_id = 'w3'").first();
+  check("10-12 授權失效：記 auth_expired、首頁看得到；老師回來就清掉", w?.last_error === "auth_expired" && item3?.lastError === "auth_expired" && w2?.last_error === null, JSON.stringify({ w, w2 }));
+
+  // 批改頁清單帶出人工批原因
+  const list = await call("GET", "/api/submissions/w3");
+  const dRow = list.json?.submissions?.find((s: any) => s.id === "ag-d");
+  check("10-13 批改頁清單帶出「需要人工批」原因與最後自動更新時間", !!dRow?.autograde_error && typeof list.json?.autoSyncedAt === "number");
+
+  const before14 = (await call("GET", "/api/inbox")).json.items.find((i: any) => i.courseWorkId === "w3")?.needsTeacher;
+  await call("PATCH", "/api/submissions/ag-d/grade", { finalScore: 6, finalFeedback: "老師自己批", confirm: false });
+  const after14 = (await call("GET", "/api/inbox")).json.items.find((i: any) => i.courseWorkId === "w3")?.needsTeacher;
+  const d14: any = await sub("ag-d");
+  check("10-14 老師自己打分後，「要你自己批」提醒清掉、首頁數字跟著減", d14?.autograde_error === null && after14 === before14 - 1, `${before14}→${after14}`);
+
+  classroomSubs = null;
+}
+
 console.log(`\n結果：${pass} 通過、${fail} 失敗`);
 await dispose();
 process.exit(fail ? 1 : 0);

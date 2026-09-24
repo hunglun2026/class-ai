@@ -8,6 +8,7 @@ import { extractDocxText } from "../lib/docx";
 import { base64ToBytes } from "../lib/base64";
 import { getClassroomRubric, classroomRubricToItems } from "../lib/classroom";
 import { getValidAccessToken } from "../lib/tokens";
+import { watchCourseWork } from "../lib/sync";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
@@ -249,6 +250,9 @@ rubricRoutes.post("/", async (c) => {
     // 舊檔刪不掉只是多佔一點空間，不影響這次儲存
     await c.env.ATTACHMENTS.delete(oldR2Key).catch((e) => console.error("[rubrics] 舊答案檔刪除失敗", oldR2Key, e));
   }
+
+  // 設好評分標準＝這份作業交給背景自動預批（v1.17.0），登記失敗不影響這次儲存
+  await watchCourseWork(c.env, teacherId, body.courseWorkId).catch((e) => console.error("[rubrics] 登記自動預批失敗", e));
 
   return c.json({ id: saved?.id ?? id });
 });

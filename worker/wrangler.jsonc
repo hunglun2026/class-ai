@@ -34,6 +34,8 @@
       "bucket_name": "class-ai-answer-keys"
     }
   ],
+  // v1.17.0 背景自動預批改：每 10 分鐘去 Classroom 拉新繳交、叫 AI 評（lib/autograde.ts）
+  "triggers": { "crons": ["*/10 * * * *"] },
   // 這裡是「正式環境」的值（wrangler deploy 會用）。
   // 本機開發時 worker/.dev.vars 會覆蓋掉這三個 key，改回 localhost。
   "vars": {
@@ -43,9 +45,11 @@
     "APP_URL": "https://classai.hunglun.com",
     // 跟著 worker/package.json 的 version 走，每次改版一起手動更新兩處；
     // 只是給 /health 顯示用，方便發布後打線上端點確認真的換新版本上線
-    "APP_VERSION": "1.16.0",
+    "APP_VERSION": "1.17.0",
     // 每位老師的 AI 評分上限：一位老師用過頭不會影響其他老師（改這裡就好，不用改程式）
     "DAILY_AI_LIMIT": "200",
-    "MINUTE_AI_LIMIT": "20"
+    "MINUTE_AI_LIMIT": "20",
+    // 背景自動預批每 10 分鐘最多評幾位（部署後看排程有沒有碰到 CPU 上限再調）
+    "AUTOGRADE_PER_RUN": "15"
   }
 }

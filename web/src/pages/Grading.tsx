@@ -25,6 +25,12 @@ interface Submission {
   attachments_json: string | null;
   turned_in_at: number | null; // 學生最後一次繳交時間（unix 秒）
   grade_updated_at: number | null; // 分數最後一次變動時間
+  autograde_error: string | null; // 背景自動預批時 AI 評不了的原因（v1.17.0），老師要自己批
+}
+
+// AI 評不了、要老師自己批的（老師已經打過分就不算）
+function needsTeacher(s: Submission): string | undefined {
+  return s.autograde_error && (!s.status || s.status === "ai_suggested") ? s.autograde_error : undefined;
 }
 
 // 學生在老師評分之後又重交：分數是針對舊版本的，要提醒老師重看
@@ -75,7 +81,7 @@ function parseConfidenceFlags(raw: string | null): string[] {
   }
 }
 
-type Filter = "all" | "todo" | "review" | "done" | "failed" | "resubmitted";
+type Filter = "all" | "todo" | "review" | "done" | "failed" | "resubmitted" | "manual";
 
 const BATCH_CONCURRENCY = 3;
 
@@ -131,6 +137,8 @@ export default function Grading() {
         else setRubric(r.rubric);
       })
       .catch((e) => setError(e.message));
+    // 這份作業交給背景自動預批（v1.17.0）；登記失敗不影響老師在這頁做事
+    api.watchCourseWork(courseWorkId).catch(() => {});
     // 先讀快取；第一次來（快取是空的）就自動去 Classroom 抓，不用老師自己找按鈕
     api
       .listSubmissions(courseWorkId)
@@ -154,7 +162,8 @@ export default function Grading() {
   const autoTried = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!rubric || !submissions || batch || remaining === null || remaining <= 0) return;
-    const todo = submissions.filter((s) => !s.status && hasTurnedIn(s) && !autoTried.current.has(s.id));
+    // 背景已經判定 AI 評不了的不再自動送（老師可以在卡片上自己按「請 AI 評」）
+    const todo = submissions.filter((s) => !s.status && hasTurnedIn(s) && !s.autograde_error && !autoTried.current.has(s.id));
     if (!todo.length) return;
     const chosen = todo.slice(0, remaining);
     chosen.forEach((s) => autoTried.current.add(s.id));
@@ -298,7 +307,8 @@ export default function Grading() {
   const counts = useMemo(
     () => ({
       all: list.length,
-      todo: list.filter((s) => !s.status && hasTurnedIn(s)).length,
+      todo: list.filter((s) => !s.status && hasTurnedIn(s) && !needsTeacher(s)).length,
+      manual: list.filter((s) => !!needsTeacher(s)).length,
       review: list.filter((s) => s.status === "ai_suggested" || s.status === "teacher_edited").length,
       done: list.filter((s) => s.status === "confirmed").length,
       failed: list.filter((s) => failures[s.id]).length,
@@ -311,11 +321,12 @@ export default function Grading() {
     }),
     [list, failures]
   );
-  const ungraded = list.filter((s) => !s.status && !failures[s.id] && hasTurnedIn(s));
+  const ungraded = list.filter((s) => !s.status && !failures[s.id] && hasTurnedIn(s) && !needsTeacher(s));
   const failedList = list.filter((s) => failures[s.id]);
 
   const visible = list.filter((s) => {
-    if (filter === "todo") return !s.status && hasTurnedIn(s);
+    if (filter === "todo") return !s.status && hasTurnedIn(s) && !needsTeacher(s);
+    if (filter === "manual") return !!needsTeacher(s);
     if (filter === "review") return s.status === "ai_suggested" || s.status === "teacher_edited";
     if (filter === "done") return s.status === "confirmed";
     if (filter === "failed") return !!failures[s.id];
@@ -355,6 +366,7 @@ export default function Grading() {
     { key: "todo", label: "還沒評分", n: counts.todo },
     { key: "review", label: "等你確認", n: counts.review },
     { key: "done", label: "已完成", n: counts.done },
+    ...(counts.manual ? [{ key: "manual" as Filter, label: "要你自己批", n: counts.manual }] : []),
     ...(counts.failed ? [{ key: "failed" as Filter, label: "評分失敗", n: counts.failed }] : []),
     ...(counts.resubmitted ? [{ key: "resubmitted" as Filter, label: "學生重交", n: counts.resubmitted }] : []),
   ];
@@ -509,6 +521,7 @@ export default function Grading() {
           maxPoints={maxPoints}
           busy={busyIds.has(s.id)}
           failure={failures[s.id]}
+          needsTeacher={needsTeacher(s)}
           position={`${i + 1}／${visible.length}`}
           onPrev={i > 0 ? () => goTo(visible[i - 1].id) : undefined}
           onNext={i < visible.length - 1 ? () => goTo(visible[i + 1].id) : undefined}
@@ -541,6 +554,7 @@ function SubmissionCard({
   maxPoints,
   busy,
   failure,
+  needsTeacher,
   position,
   onPrev,
   onNext,
@@ -553,6 +567,7 @@ function SubmissionCard({
   maxPoints: number;
   busy: boolean;
   failure?: string;
+  needsTeacher?: string;
   position: string;
   onPrev?: () => void;
   onNext?: () => void;
@@ -709,6 +724,8 @@ function SubmissionCard({
       ? { cls: "busy", label: "AI 評分中…" }
       : confirmed
         ? { cls: "confirmed", label: "已完成" }
+        : needsTeacher && !submission.status
+          ? { cls: "failed", label: "要你自己批" }
         : submission.status
           ? { cls: "review", label: "等你確認" }
           : turnedIn
@@ -806,6 +823,11 @@ function SubmissionCard({
       {failure && (
         <div className="fail-box" role="alert">
           {failure}
+        </div>
+      )}
+      {!failure && needsTeacher && (
+        <div className="fail-box" role="status">
+          ✋ classAI 先幫你看過了，這位 AI 沒辦法評：{needsTeacher}
         </div>
       )}
 

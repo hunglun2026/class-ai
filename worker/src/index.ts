@@ -13,6 +13,8 @@ import { GoogleAuthExpiredError } from "./lib/google-oauth";
 import { ZodError } from "zod";
 import { ClassroomError } from "./lib/classroom";
 import { mcpAuthRoutes, mcpApiApp } from "./mcp-auth";
+import { runAutoGrade } from "./lib/autograde";
+import { inboxRoutes } from "./routes/inbox";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -47,6 +49,7 @@ app.route("/api/submissions", submissionRoutes);
 app.route("/api/calibration", calibrationRoutes);
 app.route("/api/rubric-templates", rubricTemplateRoutes);
 app.route("/api/usage", usageRoutes);
+app.route("/api/inbox", inboxRoutes);
 
 app.onError((err, c) => {
   // 前端送來的資料格式不對（zod 驗證沒過）是請求的問題不是系統壞了，回 400；細節只進 log
@@ -86,7 +89,7 @@ app.onError((err, c) => {
 
 // OAuthProvider 包住整支 app：/mcp 這條路先驗證 Bearer token 才交給 mcpApiApp，
 // 其餘路徑（含 /oauth/authorize、/oauth/callback）原樣交給 app 處理，行為跟包之前一樣。
-export default new OAuthProvider<Env>({
+const provider = new OAuthProvider<Env>({
   apiRoute: "/mcp",
   apiHandler: mcpApiApp,
   defaultHandler: app,
@@ -95,3 +98,11 @@ export default new OAuthProvider<Env>({
   clientRegistrationEndpoint: "/oauth/register",
   scopesSupported: ["classai:read"],
 });
+
+// v1.17.0：除了處理請求，再加 Cron 排程（wrangler.jsonc triggers）做背景自動預批改
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => provider.fetch(request, env, ctx),
+  scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(runAutoGrade(env));
+  },
+};

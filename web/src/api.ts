@@ -76,6 +76,21 @@ function filenameFromHeader(header: string | null): string | undefined {
   }
 }
 
+export interface InboxItem {
+  courseWorkId: string;
+  title: string;
+  maxPoints: number | null;
+  courseId: string;
+  courseName: string;
+  autoSyncedAt: number | null;
+  lastError: string | null;
+  green: number;
+  yellow: number;
+  red: number;
+  needsTeacher: number;
+  resubmitted: number;
+}
+
 export const api = {
   loginUrl: () => `${API_BASE}/api/auth/google/login`,
   me: () => request<{ teacher: { id: string; email: string; name: string; picture?: string } | null }>("/api/auth/me"),
@@ -114,7 +129,11 @@ export const api = {
     request<{ submissions: any[] }>(`/api/submissions/${courseId}/${courseWorkId}/sync`, { method: "POST" }),
   // 輕的：只讀 D1 快取，評分完刷新畫面用這支，不要每評一個人就整班重拉一次
   listSubmissions: (courseWorkId: string) =>
-    request<{ submissions: any[] }>(`/api/submissions/${courseWorkId}`),
+    request<{ submissions: any[]; autoSyncedAt?: number | null }>(`/api/submissions/${courseWorkId}`),
+  // 打開批改頁時登記：這份作業交給背景自動預批 21 天（v1.17.0）
+  watchCourseWork: (courseWorkId: string) => request(`/api/submissions/${courseWorkId}/watch`, { method: "POST" }),
+  // 首頁「等你確認」：背景已經批好、等老師看的作業
+  inbox: () => request<{ items: InboxItem[] }>("/api/inbox"),
   // force：老師改過的分數/評語，確認過要讓 AI 蓋掉才帶（不帶時後端回 code "overwrite_teacher_edit"）
   aiGrade: (submissionId: string, force = false) =>
     request<{

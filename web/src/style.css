@@ -490,6 +490,11 @@ textarea:focus, input:focus, select:focus {
 .badge.risk-red { background: #fee2e2; color: #b91c1c; }
 
 .risk-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* 首頁「等你確認」（v1.17.0）：背景已經批好的作業 */
+.inbox-panel { margin: 0 0 28px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--brand-soft); }
+.inbox-title { margin: 0 0 4px; font-size: 1.15rem; }
+.inbox-sub { margin: 0 0 12px; }
+.inbox-panel .pick-body .risk-summary { margin-top: 6px; }
 .risk-chip {
   display: inline-block;
   padding: 3px 12px;

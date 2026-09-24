@@ -14,6 +14,8 @@ export interface Env {
   // AI 評分用量上限（每位老師）：不設就用 usage.ts 的預設（每天 200、每分鐘 20）
   DAILY_AI_LIMIT?: string;
   MINUTE_AI_LIMIT?: string;
+  // 背景自動預批每輪（10 分鐘）最多評幾位，不設就 15（lib/autograde.ts）
+  AUTOGRADE_PER_RUN?: string;
   // MCP（讓 Claude Desktop / Claude Code 直接呼叫 classAI）用的 OAuth 2.1 提供者：
   // OAUTH_KV 是 @cloudflare/workers-oauth-provider 套件內部要求的固定綁定名稱，
   // 存 client/grant/token，跟給老師網頁登入用的 SESSIONS KV 分開。
