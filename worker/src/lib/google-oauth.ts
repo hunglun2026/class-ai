@@ -33,14 +33,20 @@ export function missingScopes(granted: Set<string>): string[] {
   return REQUIRED_SCOPE_GROUPS.filter((g) => !g.some((s) => granted.has(s))).map((g) => g[0]);
 }
 
-export function buildAuthUrl(env: Env, state: string): string {
+// v1.18.0：在 classAI 出作業、把分數送回 Classroom 草稿分數要可寫入的權限。
+// 只有老師第一次按「在 classAI 出作業」才要（漸進式授權），一般登入不多要，現有老師不受影響。
+export const WRITE_SCOPE = "https://www.googleapis.com/auth/classroom.coursework.students";
+
+export function buildAuthUrl(env: Env, state: string, opts: { write?: boolean } = {}): string {
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: env.GOOGLE_REDIRECT_URI,
     response_type: "code",
-    scope: SCOPES.join(" "),
+    scope: [...SCOPES, ...(opts.write ? [WRITE_SCOPE] : [])].join(" "),
     access_type: "offline",
     prompt: "consent", // 每次都要求同意畫面，才拿得到 refresh_token
+    // 之前給過的權限（例如寫入）一般登入也一起帶回來，不用每次重新要
+    include_granted_scopes: "true",
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;

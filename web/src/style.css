@@ -229,7 +229,7 @@ button.small, .btn.small { min-height: 40px; padding: 6px 12px; font-size: 15px;
 .link-btn { color: var(--brand); font-weight: 600; text-decoration: none; white-space: nowrap; padding: 8px 0; }
 .link-btn:hover { text-decoration: underline; }
 
-textarea, input[type="text"], input[type="number"], input[type="search"], select {
+textarea, input[type="text"], input[type="number"], input[type="search"], input[type="date"], input[type="time"], select {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid #cbd5e1;
@@ -563,3 +563,38 @@ textarea:focus, input:focus, select:focus {
 .login-notice a { color: var(--brand); }
 .error-box { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .warn-text { margin: 6px 0; padding: 8px 12px; border-radius: 10px; background: var(--st-review-bg); color: #7c4a03; font-size: 15px; overflow-wrap: anywhere; }
+
+/* ---------- v1.18.0 在 classAI 出作業、送分數回 Classroom、全班學習診斷 ---------- */
+.new-work-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; }
+.new-work-bar .hint-line { margin: 0; }
+.inline-badge { margin-left: 8px; vertical-align: 2px; font-size: 13px; }
+.card-title { font-size: 20px; margin: 0 0 10px; }
+.plain-list { margin: 8px 0 0; padding-left: 22px; line-height: 1.8; }
+.short-input { max-width: 160px; }
+.due-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.due-row input[type="date"] { max-width: 200px; }
+.due-row input[type="time"] { max-width: 170px; }
+.publish-choice { border: none; padding: 0; margin: 16px 0 0; }
+.publish-choice legend { margin-bottom: 6px; }
+.publish-choice label { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; cursor: pointer; line-height: 1.6; }
+.publish-choice input[type="radio"] { margin-top: 6px; width: 18px; height: 18px; flex: none; }
+
+.writeback-panel { border-left: 4px solid var(--brand); }
+.writeback-panel.muted-panel { border-left-color: var(--line); background: #f8fafc; box-shadow: none; }
+.writeback-panel p { margin: 6px 0; }
+.writeback-panel .form-footer { margin-top: 10px; padding-top: 10px; }
+.push-fail-list { margin: 6px 0 0; padding-left: 20px; color: var(--st-fail); }
+.badge.pushed { background: #e0f2fe; color: #075985; }
+.badge.push-stale { background: #fef3c7; color: #92400e; }
+.badge.similar { background: #ffedd5; color: #9a3412; }
+
+.insights-panel { border-left: 4px solid #7c3aed; }
+.insights-panel h2 { font-size: 19px; margin: 0 0 8px; }
+.insights-issue { padding: 10px 0; border-top: 1px dashed var(--line); }
+.insights-issue:first-of-type { border-top: none; }
+.insights-issue strong { font-size: 17px; }
+.insights-issue p { margin: 4px 0; }
+.insights-names { font-size: 15px; color: var(--ink-soft); }
+.insights-tip { background: #f5f3ff; border-radius: 8px; padding: 6px 10px; }
+/* 出作業表單的欄位說明比較長，手機上要能換行（.field-label 預設不換行） */
+form.card .field-label.block { white-space: normal; }

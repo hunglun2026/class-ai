@@ -8,14 +8,17 @@ import { gradeOneSubmission, logGradeHistory } from "../lib/grade";
 import { isMeaningfulEdit, saveCalibrationExample } from "../lib/calibration";
 import * as XLSX from "@e965/xlsx";
 import { ownsCourse, ownsCourseWork } from "../lib/ownership";
+import { courseWorkCanWriteBack, pushConfirmedGrades, teacherCanWrite } from "../lib/writeback";
+import { buildInsights, getCachedInsights } from "../lib/insights";
 
 export const submissionRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 submissionRoutes.use("*", requireAuth);
 
 const SUBMISSIONS_SELECT = `
   SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags, g.risk_level,
-    g.updated_at AS grade_updated_at
+    g.updated_at AS grade_updated_at, p.pushed_score, p.pushed_at
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
+  LEFT JOIN grade_pushes p ON p.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
 
 // 只讀 D1 快取，不打 Classroom API——AI 評分完刷新畫面走這支，不要每評一個人就整班重拉一次
@@ -30,7 +33,42 @@ submissionRoutes.get("/:courseWorkId", async (c) => {
   const watch = await c.env.DB.prepare("SELECT last_synced_at FROM autograde_watch WHERE coursework_id = ?")
     .bind(courseWorkId)
     .first<{ last_synced_at: number | null }>();
-  return c.json({ submissions: rows.results, autoSyncedAt: watch?.last_synced_at ?? null });
+  // v1.18.0：這份作業能不能把分數送回 Classroom、老師有沒有給寫入權限，決定批改頁顯示哪種按鈕
+  const [canWriteBack, canWrite] = await Promise.all([courseWorkCanWriteBack(c.env, courseWorkId), teacherCanWrite(c.env, teacherId)]);
+  return c.json({ submissions: rows.results, autoSyncedAt: watch?.last_synced_at ?? null, canWriteBack, canWrite });
+});
+
+// v1.18.0 把老師確認過的分數送回 Classroom（草稿分數，老師在 Classroom 按「發還」才算數）
+submissionRoutes.post("/:courseWorkId/push-grades", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  const out = await pushConfirmedGrades(c.env, teacherId, courseWorkId);
+  if (!out.ok) return c.json({ error: out.error, code: out.code }, out.status);
+  return c.json(out);
+});
+
+// v1.18.0 全班學習診斷：GET 只讀快取（不花 AI 次數），POST 才叫 AI 整理
+submissionRoutes.get("/:courseWorkId/insights", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  return c.json(await getCachedInsights(c.env, courseWorkId));
+});
+
+submissionRoutes.post("/:courseWorkId/insights", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  const out = await buildInsights(c.env, teacherId, courseWorkId);
+  if (!out.ok) return c.json({ error: out.error, code: out.code }, out.status);
+  return c.json(out);
 });
 
 // 老師打開批改頁：這份作業交給背景自動預批 21 天（重複打開就延長），並清掉「要重新登入」的舊錯誤

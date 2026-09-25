@@ -55,14 +55,64 @@ export interface ClassroomCourseWork {
   dueDate?: { year: number; month: number; day: number };
   dueTime?: { hours?: number; minutes?: number };
   creationTime?: string;
+  // 是不是本 API 專案（classAI）建的；Google 只讓建立者寫分數，這是能不能送回 Classroom 的依據
+  associatedWithDeveloper?: boolean;
 }
 
-export async function listCourseWork(accessToken: string, courseId: string): Promise<ClassroomCourseWork[]> {
-  return paginate<ClassroomCourseWork>(
-    accessToken,
-    `/courses/${courseId}/courseWork?courseWorkStates=PUBLISHED&pageSize=100`,
-    "courseWork"
-  );
+// 已發布的全部列；草稿只列 classAI 自己建的（老師在 Classroom 存的草稿不列出來干擾）。
+// 只有給過寫入權限的老師才一起要草稿：沒給的老師維持原本只查已發布，行為完全不變
+export async function listCourseWork(
+  accessToken: string,
+  courseId: string,
+  opts: { includeClassaiDrafts?: boolean } = {}
+): Promise<ClassroomCourseWork[]> {
+  const states = opts.includeClassaiDrafts ? "courseWorkStates=PUBLISHED&courseWorkStates=DRAFT" : "courseWorkStates=PUBLISHED";
+  const all = await paginate<ClassroomCourseWork>(accessToken, `/courses/${courseId}/courseWork?${states}&pageSize=100`, "courseWork");
+  return all.filter((w) => w.state === "PUBLISHED" || (w.state === "DRAFT" && w.associatedWithDeveloper));
+}
+
+// 寫入類呼叫（建作業、寫草稿分數）共用：錯誤一樣帶狀態碼，403 由呼叫端換成白話說明
+async function sendClassroom<T>(accessToken: string, method: "POST" | "PATCH", path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new ClassroomError(res.status, `Classroom API ${method} ${path} 回 ${res.status}：${(await res.text()).slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+export interface NewCourseWork {
+  title: string;
+  description?: string;
+  maxPoints: number;
+  publish: boolean; // false＝存成 Classroom 草稿，老師可以回 Classroom 補附件再發布
+  // 台灣時間的截止日期與時間；Classroom 要 UTC，這裡換算
+  due?: { date: string; time?: string }; // date: YYYY-MM-DD, time: HH:MM
+}
+
+// 台灣時間（UTC+8，沒有夏令時間）換成 Classroom 要的 UTC 日期＋時間；沒給時間就當天 23:59
+export function toClassroomDue(due: { date: string; time?: string }) {
+  const [y, m, d] = due.date.split("-").map(Number);
+  const [hh, mm] = (due.time ?? "23:59").split(":").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d, hh - 8, mm));
+  return {
+    dueDate: { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() },
+    dueTime: { hours: utc.getUTCHours(), minutes: utc.getUTCMinutes() },
+  };
+}
+
+export async function createCourseWork(accessToken: string, courseId: string, w: NewCourseWork): Promise<ClassroomCourseWork> {
+  return sendClassroom<ClassroomCourseWork>(accessToken, "POST", `/courses/${courseId}/courseWork`, {
+    title: w.title,
+    ...(w.description ? { description: w.description } : {}),
+    maxPoints: w.maxPoints,
+    workType: "ASSIGNMENT",
+    state: w.publish ? "PUBLISHED" : "DRAFT",
+    ...(w.due ? toClassroomDue(w.due) : {}),
+  });
 }
 
 export interface ClassroomAttachment {
@@ -199,9 +249,8 @@ export function classroomRubricToItems(
 }
 
 /**
- * 把 AI 建議分數寫入 draftGrade（老師專屬看得到，學生看不到）。
- * 目前這次不接這條路——WEB 只在工具內顯示分數，等之後要做「寫回 Classroom」才會呼叫這支。
- * 先留著介面，實作對照官方文件：patch + updateMask=draftGrade。
+ * 把老師確認過的分數寫入 draftGrade（草稿分數：只有老師看得到，學生看不到，老師在 Classroom 按「發還」才算數）。
+ * 只能寫 classAI 自己建的作業（associatedWithDeveloper），其他作業 Google 回 403（09-22 實驗2 實測）。
  */
 export async function patchDraftGrade(
   accessToken: string,
@@ -210,16 +259,10 @@ export async function patchDraftGrade(
   submissionId: string,
   draftGrade: number
 ): Promise<void> {
-  const res = await fetch(
-    `${BASE}/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}?updateMask=draftGrade`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ draftGrade }),
-    }
+  await sendClassroom(
+    accessToken,
+    "PATCH",
+    `/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}?updateMask=draftGrade`,
+    { draftGrade }
   );
-  if (!res.ok) throw new Error(`寫入 draftGrade 失敗：${res.status} ${await res.text()}`);
 }

@@ -6,6 +6,7 @@ import { clearPending, confirmLeave } from "./unsaved";
 import Login from "./pages/Login";
 import Courses from "./pages/Courses";
 import CourseWork from "./pages/CourseWork";
+import NewCourseWork from "./pages/NewCourseWork";
 import Grading from "./pages/Grading";
 import RubricSetup from "./pages/RubricSetup";
 
@@ -84,6 +85,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Courses />} />
           <Route path="/courses/:courseId" element={<CourseWork />} />
+          <Route path="/courses/:courseId/new" element={<NewCourseWork />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId/setup" element={<RubricSetup />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId" element={<Grading />} />
         </Routes>

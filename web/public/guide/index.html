@@ -251,6 +251,8 @@
     <a href="#step3">設定評分標準</a>
     <a href="#step4">批改學生</a>
     <a href="#auto">自動預批</a>
+    <a href="#writeback">分數送回</a>
+    <a href="#after">批完之後</a>
     <a href="#record">登記成績</a>
     <a href="#faq">常見問題</a>
   </nav>
@@ -272,7 +274,7 @@
 
   <section class="step" id="login">
     <div class="step-head"><span class="step-num">LOGIN</span><h2>登入</h2></div>
-    <p>打開網址先看到密碼頁，輸入 <span class="mono">5407</span> 進站。接著按「用 Google 帳號登入」——<strong>請用在 Google Classroom 開課的那個帳號</strong>，個人 Gmail 帳號也可以開課，登入不同的帳號會找不到課程。</p>
+    <p>打開網址先看到密碼頁，輸入 <span class="mono">5407</span> 進站。接著按「用 Google 帳號登入」，<strong>請用在 Google Classroom 開課的那個帳號</strong>，個人 Gmail 帳號也可以開課，登入不同的帳號會找不到課程。</p>
     <div class="callout info">
       第一次登入可能看到「Google 尚未驗證這個應用程式」，這是正常的，工具還在小範圍測試，沒送 Google 正式審核。按「進階」→「前往（不安全）」繼續即可，只有測試名單裡的帳號登得進去。授權會列出課程、作業、繳交內容、名冊、雲端硬碟等讀取權限，都只用來抓作業給 AI 看，工具不會修改 Classroom 裡的任何東西。
     </div>
@@ -323,10 +325,10 @@
     </div>
     <p>AI 的評語固定分三段：【做得好】【可以更好】【下一步】，學生看得懂也知道要怎麼改。每張卡片可以：</p>
     <ul class="btn-list">
-      <li><b>完成批改</b> — 這一位改好了，卡片收成一行，自動跳到下一位還沒完成的學生</li>
-      <li><b>先存起來</b> — 先存著，之後再回來改</li>
-      <li><b>複製分數與評語</b> — 直接貼到 Classroom 的私人留言或成績評語</li>
-      <li><b>請 AI 重評</b> — 重新評一次（會蓋掉目前的分數和評語）</li>
+      <li><b>完成批改</b>：這一位改好了，卡片收成一行，自動跳到下一位還沒完成的學生</li>
+      <li><b>先存起來</b>：先存著，之後再回來改</li>
+      <li><b>複製分數與評語</b>：直接貼到 Classroom 的私人留言或成績評語</li>
+      <li><b>請 AI 重評</b>：重新評一次（會蓋掉目前的分數和評語）</li>
     </ul>
     <p>電腦上在評語框按 <span class="mono">Ctrl + Enter</span>（Mac 是 <span class="mono">Cmd + Enter</span>）就是「完成批改並跳下一位」，一般 Enter 照樣換行。上面的進度條顯示「已完成 X／Y 位」，篩選標籤可以切全部／還沒評分／等你確認／已完成。</p>
     <div class="shot"><img src="assets/step4-grading.png" alt="批改學生畫面，AI建議分數與評語、老師確認"></div>
@@ -343,9 +345,35 @@
     <div class="callout">背景評分一樣算進你每天的 AI 次數。首頁出現「Google 授權過期」時，按「重新登入」就恢復。</div>
   </section>
 
+  <section class="step" id="writeback">
+    <div class="step-head"><span class="step-num">NEW</span><h2>在 classAI 出作業，分數一鍵送回 Classroom</h2></div>
+    <p>Google 只讓「出作業的那個工具」把分數寫進 Classroom，所以想讓分數自動回到 Classroom，作業要從 classAI 出：</p>
+    <ol>
+      <li>選作業那頁按「＋ 在 classAI 出新作業」，填標題、說明、滿分、截止時間（選填）</li>
+      <li>選「直接發布」或「先存成 Classroom 草稿」（想先到 Classroom 附上檔案再自己發布，就選草稿）</li>
+      <li>第一次會請你到 Google 多允許「查看、建立及編輯課程作業」一項，允許完會回到原本的頁面</li>
+      <li>建好直接設定評分標準；學生照常在 Classroom 繳交，classAI 在背景先批好</li>
+      <li>你確認完，按批改頁的「把已確認的 N 位分數送到 Classroom」</li>
+    </ol>
+    <ul class="btn-list">
+      <li><b>草稿分數</b>：學生看不到，到 Classroom 看過後按「發還」才算數。classAI 不會幫你發還</li>
+      <li><b>只送確認過的</b>：只送你按過「完成批改」或鎖定的分數，AI 建議的分數不會直接送出</li>
+      <li><b>改了要再送</b>：送出後你又改分，卡片會標「Classroom 上是 X 分，要再送」，再按一次只送改過的</li>
+    </ul>
+    <div class="callout">評語 Google 沒開放寫入，請用每位的「複製分數與評語」貼到 Classroom。在 Classroom 自己建的作業，照樣用「複製全班分數」或下載 Excel。</div>
+  </section>
+
+  <section class="step" id="after">
+    <div class="step-head"><span class="step-num">NEW</span><h2>批完之後：全班常見問題、雷同提醒</h2></div>
+    <ul class="btn-list">
+      <li><b>全班常見問題</b>：批好 5 位以上，批改頁會出現這一塊。按「整理全班常見問題」，AI 讀全班的評語，整理出最多 3 個大家共同卡關的地方、有哪幾位、下次上課可以怎麼補。用 1 次 AI 次數，學生姓名不會送給 AI；分數或評語改過會提示可以重新整理，沒改過不會重算</li>
+      <li><b>🟠 跟某某的作答很像</b>：兩位學生的文字作答有八成以上相同時，卡片會標出來，只是提醒，請自己打開兩份看。很短的答案、對照標準答案的作業不比，避免答對的同學被誤標</li>
+    </ul>
+  </section>
+
   <section class="step" id="record">
     <div class="step-head"><span class="step-num">END</span><h2>把成績登記進 Classroom</h2></div>
-    <div class="callout">這個工具<strong>不會自動寫回 Classroom</strong>，兩種登記方式都可以：</div>
+    <div class="callout">classAI <strong>不會自動寫回 Classroom</strong>。在 classAI 出的作業可以按按鈕送回草稿分數（見上一段）；其他作業兩種登記方式都可以：</div>
     <ol>
       <li>每位學生按「複製分數與評語」，貼到 Classroom</li>
       <li>按「下載成績表（Excel）」，得到姓名、分數、評語、狀態四欄的 .xlsx，邊看邊登記，也可以存檔備份</li>
@@ -378,7 +406,7 @@
 
   <footer class="page">
     <p>功能怪怪的、有想法想改，直接回報就好。</p>
-    <p class="version">classAI v1.17.1 · 由鴻綸科技提供</p>
+    <p class="version">classAI v1.18.0 · 由鴻綸科技提供</p>
   </footer>
 
 </div>

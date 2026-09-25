@@ -5,6 +5,8 @@ import Stepper from "../components/Stepper";
 import SafeLink from "../components/SafeLink";
 import { setPending } from "../unsaved";
 import { MODE_LABEL, type AssignmentState, type Mode } from "./RubricSetup";
+import { InsightsPanel, pushState, WritebackPanel } from "../components/GradingExtras";
+import { findSimilar, type SimilarMatch } from "../similarity";
 
 interface Submission {
   id: string;
@@ -26,6 +28,8 @@ interface Submission {
   turned_in_at: number | null; // 學生最後一次繳交時間（unix 秒）
   grade_updated_at: number | null; // 分數最後一次變動時間
   autograde_error: string | null; // 背景自動預批時 AI 評不了的原因（v1.17.0），老師要自己批
+  pushed_score: number | null; // 已送到 Classroom 的草稿分數（v1.18.0）
+  pushed_at: number | null;
 }
 
 // AI 評不了、要老師自己批的（老師已經打過分就不算）
@@ -115,6 +119,9 @@ export default function Grading() {
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  // v1.18.0：這份作業能不能把分數送回 Classroom（classAI 出的才行）、老師有沒有給寫入權限
+  const [writeback, setWriteback] = useState<{ canWriteBack: boolean; canWrite: boolean }>({ canWriteBack: false, canWrite: false });
+  const [insightsKey, setInsightsKey] = useState(0);
   // 今天還能讓 AI 評幾份（所有老師共用一把 AI 金鑰，每人每天有上限）
   const [remaining, setRemaining] = useState<number | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -143,6 +150,7 @@ export default function Grading() {
     api
       .listSubmissions(courseWorkId)
       .then((r) => {
+        setWriteback({ canWriteBack: !!r.canWriteBack, canWrite: !!r.canWrite });
         if (r.submissions.length) setSubmissions(r.submissions);
         else syncSubmissions();
       })
@@ -174,7 +182,9 @@ export default function Grading() {
   async function refreshSubmissions() {
     if (!courseWorkId) return;
     const r = await api.listSubmissions(courseWorkId);
+    setWriteback({ canWriteBack: !!r.canWriteBack, canWrite: !!r.canWrite });
     setSubmissions(r.submissions);
+    setInsightsKey((k) => k + 1);
   }
 
   async function syncSubmissions() {
@@ -355,6 +365,11 @@ export default function Grading() {
   }
 
   const maxPoints = rubric?.maxPoints ?? rubric?.max_points ?? assignment?.maxPoints ?? 100;
+  // v1.18.0 同學作答雷同提醒：對照標準答案的作業大家答對本來就會很像，不比
+  const similar = useMemo(
+    () => (rubric && rubric.mode !== "answer_key" && submissions ? findSimilar(submissions) : new Map<string, SimilarMatch>()),
+    [rubric, submissions]
+  );
   // 進度以「有交作業的人」為分母：班上只要有一位缺交，用全班人數當分母就永遠到不了
   // 100%，「全班都批改完了」的提示也永遠不會出現，即使老師該做的都做完了
   const gradableCount = list.filter(hasTurnedIn).length;
@@ -398,7 +413,9 @@ export default function Grading() {
       )}
 
       <p className="trust-note">
-        AI 給的分數和評語只是草稿，不會寫回 Google Classroom；要看過、按「完成批改」才算數。
+        {writeback.canWriteBack
+          ? "AI 給的分數和評語只是草稿，要看過、按「完成批改」才算數；只有你確認過的分數才能送回 Classroom。"
+          : "AI 給的分數和評語只是草稿，不會寫回 Google Classroom；要看過、按「完成批改」才算數。"}
       </p>
 
       {(assignment?.teacherCount ?? 1) > 1 && (
@@ -469,6 +486,17 @@ export default function Grading() {
         )}
       </div>
 
+      {courseWorkId && list.length > 0 && (
+        <WritebackPanel
+          rows={list}
+          canWriteBack={writeback.canWriteBack}
+          canWrite={writeback.canWrite}
+          courseWorkId={courseWorkId}
+          onPushed={refreshSubmissions}
+        />
+      )}
+      {courseWorkId && <InsightsPanel courseWorkId={courseWorkId} refreshKey={insightsKey} />}
+
       {counts.resubmitted > 0 && filter !== "resubmitted" && (
         <div className="warn-text error-box" role="status">
           <span>有 {counts.resubmitted} 位學生在你評分之後又重新交了作業，分數是針對舊版本的。</span>
@@ -483,7 +511,11 @@ export default function Grading() {
           <img src="/illust/done.webp" alt="" width={120} height={120} />
           <div>
             <strong>全班都批改完了！</strong>
-            <p>按每張卡片的「複製分數與評語」貼回 Classroom，或下載 Excel 成績表對照登記。</p>
+            <p>
+              {writeback.canWriteBack
+                ? "按上面「送到 Classroom」把分數送回去，評語用每張卡片的「複製分數與評語」貼到 Classroom。"
+                : "按每張卡片的「複製分數與評語」貼回 Classroom，或下載 Excel 成績表對照登記。"}
+            </p>
           </div>
         </div>
       )}
@@ -522,6 +554,8 @@ export default function Grading() {
           busy={busyIds.has(s.id)}
           failure={failures[s.id]}
           needsTeacher={needsTeacher(s)}
+          similar={similar.get(s.id)}
+          canWriteBack={writeback.canWriteBack}
           position={`${i + 1}／${visible.length}`}
           onPrev={i > 0 ? () => goTo(visible[i - 1].id) : undefined}
           onNext={i < visible.length - 1 ? () => goTo(visible[i + 1].id) : undefined}
@@ -555,6 +589,8 @@ function SubmissionCard({
   busy,
   failure,
   needsTeacher,
+  similar,
+  canWriteBack,
   position,
   onPrev,
   onNext,
@@ -568,6 +604,8 @@ function SubmissionCard({
   busy: boolean;
   failure?: string;
   needsTeacher?: string;
+  similar?: SimilarMatch;
+  canWriteBack: boolean;
   position: string;
   onPrev?: () => void;
   onNext?: () => void;
@@ -740,6 +778,19 @@ function SubmissionCard({
   };
   const riskBadge =
     submission.status === "ai_suggested" && submission.risk_level ? RISK_BADGE[submission.risk_level] : null;
+  // v1.18.0：送回 Classroom 的狀態（只有 classAI 出的作業才顯示）
+  const push = canWriteBack ? pushState(submission) : "not_ready";
+  const pushBadge =
+    push === "pushed" ? (
+      <span className="badge pushed">已送 Classroom</span>
+    ) : push === "stale" ? (
+      <span className="badge push-stale" title="送出後你又改了分數">Classroom 上是 {submission.pushed_score} 分，要再送</span>
+    ) : null;
+  const similarBadge = similar ? (
+    <span className="badge similar" title="只是提醒，請自己看兩份原文判斷">
+      🟠 跟{similar.otherName}的作答很像（{similar.percent}%）
+    </span>
+  ) : null;
 
   // 已完成的卡片收成一行，全班頁面才不會越改越長
   if (confirmed && !expanded) {
@@ -754,6 +805,8 @@ function SubmissionCard({
             {savedScoreText} ／ {maxPoints}
           </span>
           {resubmitted && <span className="badge review">學生重交了，請展開重看</span>}
+          {pushBadge}
+          {similarBadge}
           <button className="secondary small" onClick={copy}>
             {copied ? "已複製" : "複製分數與評語"}
           </button>
@@ -772,6 +825,8 @@ function SubmissionCard({
           <strong className="student-name">{submission.student_name}</strong>
           <span className={`badge ${badge.cls}`}>{badge.label}</span>
           {riskBadge && <span className={`badge ${riskBadge.cls}`}>{riskBadge.label}</span>}
+          {pushBadge}
+          {similarBadge}
         </div>
         <div className="row nav-mini">
           <span className="muted">{position}</span>

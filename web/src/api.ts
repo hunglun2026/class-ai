@@ -76,6 +76,19 @@ function filenameFromHeader(header: string | null): string | undefined {
   }
 }
 
+export interface ClassInsights {
+  summary: string;
+  strengths: string;
+  issues: { title: string; detail: string; students: string[]; suggestion: string }[];
+}
+export interface InsightsState {
+  gradedCount: number;
+  minGraded: number;
+  insights: ClassInsights | null;
+  createdAt: number | null;
+  stale: boolean;
+}
+
 export interface InboxItem {
   courseWorkId: string;
   title: string;
@@ -93,7 +106,10 @@ export interface InboxItem {
 
 export const api = {
   loginUrl: () => `${API_BASE}/api/auth/google/login`,
-  me: () => request<{ teacher: { id: string; email: string; name: string; picture?: string } | null }>("/api/auth/me"),
+  // v1.18.0：多要「寫入 Classroom 作業」的權限（在 classAI 出作業、送分數回 Classroom 才需要），同意完回到 returnPath
+  upgradeUrl: (returnPath: string) => `${API_BASE}/api/auth/google/upgrade?return=${encodeURIComponent(returnPath)}`,
+  me: () =>
+    request<{ teacher: { id: string; email: string; name: string; picture?: string; canWrite?: boolean } | null }>("/api/auth/me"),
   logout: () => request("/api/auth/logout", { method: "POST" }),
 
   // teacherCount：這門課在 classAI 裡有幾位老師（協同教學時 > 1，批改頁會提醒分數是共用的）
@@ -108,8 +124,20 @@ export const api = {
         dueDate?: { year: number; month: number; day: number };
         dueTime?: { hours?: number; minutes?: number };
         creationTime?: string;
+        state?: string;
+        associatedWithDeveloper?: boolean; // classAI 自己出的作業，分數送得回 Classroom
       }[];
+      canWrite?: boolean;
     }>(`/api/courses/${courseId}/coursework`),
+  // v1.18.0 在 classAI 出作業（建在 Classroom 課程裡）；due 是台灣時間
+  createCourseWork: (
+    courseId: string,
+    body: { title: string; description?: string; maxPoints: number; publish: boolean; due?: { date: string; time?: string } }
+  ) =>
+    request<{ courseWork: { id: string; title: string; maxPoints?: number } }>(`/api/courses/${courseId}/coursework`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // courseworkMaxPoints／gradedCount／maxGivenScore：評分標準頁的防呆提醒用（總分跟 Classroom 不同、已經有人評過分）
   getRubric: (courseWorkId: string) =>
@@ -129,7 +157,22 @@ export const api = {
     request<{ submissions: any[] }>(`/api/submissions/${courseId}/${courseWorkId}/sync`, { method: "POST" }),
   // 輕的：只讀 D1 快取，評分完刷新畫面用這支，不要每評一個人就整班重拉一次
   listSubmissions: (courseWorkId: string) =>
-    request<{ submissions: any[]; autoSyncedAt?: number | null }>(`/api/submissions/${courseWorkId}`),
+    request<{ submissions: any[]; autoSyncedAt?: number | null; canWriteBack?: boolean; canWrite?: boolean }>(
+      `/api/submissions/${courseWorkId}`
+    ),
+  // v1.18.0 把老師確認過的分數送回 Classroom 草稿分數；一次最多 40 位，remaining>0 要接著送
+  pushGrades: (courseWorkId: string) =>
+    request<{ pushed: number; failed: { name: string; reason: string }[]; remaining: number; notConfirmed: number }>(
+      `/api/submissions/${courseWorkId}/push-grades`,
+      { method: "POST" }
+    ),
+  // v1.18.0 全班學習診斷：get 只讀快取不花次數，build 才叫 AI
+  getInsights: (courseWorkId: string) => request<InsightsState>(`/api/submissions/${courseWorkId}/insights`),
+  buildInsights: (courseWorkId: string) =>
+    request<{ insights: ClassInsights; createdAt: number; cached: boolean; remainingToday?: number }>(
+      `/api/submissions/${courseWorkId}/insights`,
+      { method: "POST" }
+    ),
   // 打開批改頁時登記：這份作業交給背景自動預批 21 天（v1.17.0）
   watchCourseWork: (courseWorkId: string) => request(`/api/submissions/${courseWorkId}/watch`, { method: "POST" }),
   // 首頁「等你確認」：背景已經批好、等老師看的作業

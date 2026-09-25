@@ -1,12 +1,13 @@
 {
   "name": "class-ai-web",
-  "version": "1.17.1",
+  "version": "1.18.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npx tsx test/similarity.test.mts"
   },
   "dependencies": {
     "react": "^18.3.1",

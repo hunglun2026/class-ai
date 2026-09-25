@@ -10,6 +10,8 @@ interface Work {
   dueDate?: { year: number; month: number; day: number };
   dueTime?: { hours?: number; minutes?: number };
   creationTime?: string;
+  state?: string;
+  associatedWithDeveloper?: boolean;
 }
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -82,6 +84,13 @@ export default function CourseWork() {
         {courseName && <p className="page-sub">{courseName}</p>}
       </div>
 
+      <div className="new-work-bar">
+        <button className="secondary" onClick={() => navigate(`/courses/${courseId}/new`, { state: { courseName } })}>
+          ＋ 在 classAI 出新作業
+        </button>
+        <span className="muted hint-line">在這裡出的作業，批完可以一鍵把分數送回 Classroom</span>
+      </div>
+
       {error && (
         <div className="error-text error-box" role="alert">
           <span>{error}</span>
@@ -104,7 +113,7 @@ export default function CourseWork() {
       {list?.length === 0 && (
         <div className="empty-state">
           <img src="/illust/empty.webp" alt="" width={140} height={140} />
-          <p>這門課還沒有已發布的作業。先到 Google Classroom 發布一份作業，再回來這裡。</p>
+          <p>這門課還沒有已發布的作業。可以按上面「在 classAI 出新作業」，或到 Google Classroom 發布一份再回來。</p>
         </div>
       )}
 
@@ -125,7 +134,11 @@ export default function CourseWork() {
                 📝
               </span>
               <span className="pick-body">
-                <strong>{w.title}</strong>
+                <strong>
+                  {w.title}
+                  {w.state === "DRAFT" && <span className="badge waiting inline-badge">Classroom 草稿，還沒發布</span>}
+                  {w.associatedWithDeveloper && <span className="badge confirmed inline-badge">分數可送回 Classroom</span>}
+                </strong>
                 <span className="muted">
                   {due ? formatDue(due) : "沒有設定截止日"}
                   {w.maxPoints != null && `｜滿分 ${w.maxPoints}`}

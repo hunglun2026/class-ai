@@ -230,3 +230,48 @@ export async function gradeSubmission(
   const kind = kinds.includes("quota") ? "quota" : kinds[kinds.length - 1] ?? "unknown";
   throw new GradeError(kind, `所有模型都評分失敗：${errors.join(" | ")}`);
 }
+
+/**
+ * 純文字進、JSON 出的通用呼叫（v1.18.0 全班學習診斷用）。
+ * 模型順序、多把 key 輪流、額度錯誤才換 key 的規則跟評分一樣。
+ */
+export async function generateJson<T>(
+  apiKeys: string[],
+  systemText: string,
+  userText: string,
+  responseSchema: unknown,
+  models: string[] = MODELS
+): Promise<{ result: T; model: string }> {
+  if (apiKeys.length === 0) throw new GradeError("unknown", "沒有設定任何 Gemini API key");
+  const startIdx = keyRotation++ % apiKeys.length;
+  const errors: string[] = [];
+  for (const model of models) {
+    for (let i = 0; i < apiKeys.length; i++) {
+      const apiKey = apiKeys[(startIdx + i) % apiKeys.length];
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemText }] },
+            contents: [{ role: "user", parts: [{ text: userText }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 4096, responseMimeType: "application/json", responseSchema },
+          }),
+          signal: AbortSignal.timeout(45_000),
+        });
+        if (!res.ok) throw new Error(`${model} 回 ${res.status}：${(await res.text()).slice(0, 200)}`);
+        const data = await res.json<any>();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error(`${model} 沒有回傳內容（可能被安全過濾擋下或額度用盡）`);
+        return { result: JSON.parse(text) as T, model };
+      } catch (e) {
+        const msg = e instanceof Error && e.name === "TimeoutError" ? `${model} 45 秒內沒有回應` : (e as Error).message;
+        errors.push(msg);
+        if (classify(msg) !== "quota") break;
+      }
+    }
+  }
+  const kinds = errors.map(classify);
+  const kind = kinds.includes("quota") ? "quota" : kinds[kinds.length - 1] ?? "unknown";
+  throw new GradeError(kind, `所有模型都失敗：${errors.join(" | ")}`);
+}

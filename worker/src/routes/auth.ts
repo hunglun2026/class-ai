@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { Env, Variables } from "../types";
-import { buildAuthUrl, decodeIdToken, exchangeCodeForTokens, missingScopes } from "../lib/google-oauth";
+import { buildAuthUrl, decodeIdToken, exchangeCodeForTokens, missingScopes, WRITE_SCOPE } from "../lib/google-oauth";
 import { encrypt } from "../lib/crypto";
 import {
   createSession,
@@ -15,14 +15,29 @@ import {
 
 export const authRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-authRoutes.get("/google/login", (c) => {
-  const state = crypto.randomUUID();
+// 登入完要回到哪一頁：只收站內路徑（/ 開頭、不是 //），避免被拿來導去別的網站
+function safeReturnPath(p: string | undefined | null): string | null {
+  if (!p || !p.startsWith("/") || p.startsWith("//") || p.length > 300) return null;
+  return p;
+}
+const toB64Url = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64Url = (s: string) =>
+  new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0)));
+
+// state 格式：<隨機>.<w或r>.<回到哪頁（base64url）>；整串存 cookie 比對，不會被竄改
+function startLogin(c: Context<{ Bindings: Env; Variables: Variables }>, write: boolean) {
+  const back = safeReturnPath(c.req.query("return"));
+  const state = `${crypto.randomUUID()}.${write ? "w" : "r"}.${back ? toB64Url(back) : ""}`;
   c.header("Set-Cookie", oauthStateCookieHeader(c.env, state));
   // 這一跳絕對不能被瀏覽器留在快取裡：每次登入的 state 都不一樣，導回網址之後若有調整，
   // 舊的那一條會被重送，老師就會看到 Google 的 redirect_uri_mismatch，還以為是帳號有問題
   c.header("Cache-Control", "no-store");
-  return c.redirect(buildAuthUrl(c.env, state));
-});
+  return c.redirect(buildAuthUrl(c.env, state, { write }));
+}
+
+authRoutes.get("/google/login", (c) => startLogin(c, false));
+// v1.18.0：老師要在 classAI 出作業／送分數回 Classroom，多要一個可寫入的權限
+authRoutes.get("/google/upgrade", (c) => startLogin(c, true));
 
 // 權限網址太長，帶回前端時換成短代碼，登入頁再換成老師看得懂的名稱
 const SCOPE_KEYS: Record<string, string> = {
@@ -95,11 +110,27 @@ authRoutes.get("/google/callback", async (c) => {
       )
       .run();
 
+    // 每次登入都照 Google 實際給的權限更新（include_granted_scopes 會把之前給過的也帶回來）
+    const canWrite = granted.has(WRITE_SCOPE);
+    await c.env.DB.prepare(
+      `INSERT INTO teacher_write_access (teacher_id, can_write, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(teacher_id) DO UPDATE SET can_write = excluded.can_write, updated_at = excluded.updated_at`
+    )
+      .bind(profile.sub, canWrite ? 1 : 0, now)
+      .run();
+
     const sessionId = await createSession(c.env, profile.sub);
     // append: true——上面已經設過一次 Set-Cookie（清 oauth_state），
     // 一般呼叫 c.header() 會覆蓋掉，兩個 cookie 都要送出去就必須用 append
     c.header("Set-Cookie", sessionCookieHeader(c.env, sessionId), { append: true });
-    return c.redirect(c.env.APP_URL);
+    const [, mode, encodedBack] = returnedState!.split(".");
+    let back: string | null = null;
+    try {
+      back = encodedBack ? safeReturnPath(fromB64Url(encodedBack)) : null;
+    } catch {}
+    // 要求寫入權限但老師在同意畫面沒勾：帶記號回去，頁面說明為什麼需要這一項
+    const denied = mode === "w" && !canWrite ? `${back?.includes("?") ? "&" : "?"}write=denied` : "";
+    return c.redirect(`${c.env.APP_URL}${back ?? "/"}${denied}`);
   } catch (e) {
     // 詳細原因只進 log，不把 Google 的原始錯誤回給老師
     console.error("[auth/callback]", e);
@@ -119,8 +150,11 @@ authRoutes.get("/me", async (c) => {
   const teacherId = await getTeacherIdFromSession(c.env, sessionId);
   if (!teacherId) return c.json({ teacher: null });
 
-  const teacher = await c.env.DB.prepare("SELECT id, email, name, picture FROM teachers WHERE id = ?")
+  const teacher = await c.env.DB.prepare(
+    `SELECT t.id, t.email, t.name, t.picture, COALESCE(w.can_write, 0) AS canWrite
+     FROM teachers t LEFT JOIN teacher_write_access w ON w.teacher_id = t.id WHERE t.id = ?`
+  )
     .bind(teacherId)
-    .first();
-  return c.json({ teacher });
+    .first<{ canWrite: number }>();
+  return c.json({ teacher: teacher ? { ...teacher, canWrite: teacher.canWrite === 1 } : null });
 });
