@@ -100,8 +100,24 @@ const provider = new OAuthProvider<Env>({
 });
 
 // v1.17.0：除了處理請求，再加 Cron 排程（wrangler.jsonc triggers）做背景自動預批改
+// 經 Pages（classai.hunglun.com）轉送進來的請求，Worker 看到的網址是 workers.dev，
+// MCP 的 redirect_uri 與 OAuth 設定檔（.well-known）就會寫成 workers.dev，Google 不認。
+// Pages 轉送時帶 X-Forwarded-Host，只有等於 APP_URL 的網域才換回來，別的值一律不理。
+export function withPublicOrigin(request: Request, env: Env): Request {
+  const fwd = request.headers.get("X-Forwarded-Host");
+  if (!fwd || !env.APP_URL) return request;
+  const app = new URL(env.APP_URL);
+  if (fwd !== app.host) return request;
+  const url = new URL(request.url);
+  if (url.host === app.host) return request;
+  url.protocol = app.protocol;
+  url.host = app.host;
+  return new Request(url.toString(), request);
+}
+
 export default {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext) => provider.fetch(request, env, ctx),
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+    provider.fetch(withPublicOrigin(request, env), env, ctx),
   scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(runAutoGrade(env));
   },

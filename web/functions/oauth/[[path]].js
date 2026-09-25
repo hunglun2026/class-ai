@@ -8,6 +8,7 @@ export async function onRequest({ request, env }) {
 
   const headers = new Headers(request.headers);
   headers.delete("Host");
+  headers.set("X-Forwarded-Host", incoming.host); // Worker 靠這個把 MCP 的 redirect_uri 寫成本網域
 
   const res = await fetch(
     new Request(target, {

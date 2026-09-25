@@ -5,8 +5,23 @@
 // 要拿掉這層保護：把 SITE_PASSWORD 環境變數刪掉即可。
 const COOKIE_NAME = "ca_auth";
 
+const DEFAULT_WORKER = "https://class-ai-worker.hunglun2026.workers.dev";
+
 export async function onRequest(context) {
   const { request, env, next } = context;
+
+  // MCP 用戶端（Claude 連接器等）先讀 /.well-known/oauth-* 找登入入口，這兩個設定檔由 Worker 產生，
+  // 不轉過去的話會拿到密碼頁或前端首頁，連接器就找不到怎麼登入
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/.well-known/oauth-")) {
+    const headers = new Headers(request.headers);
+    headers.delete("Host");
+    headers.set("X-Forwarded-Host", url.host);
+    const target = (env.WORKER_ORIGIN || DEFAULT_WORKER).replace(/\/$/, "") + url.pathname + url.search;
+    const res = await fetch(target, { headers });
+    return new Response(res.body, { status: res.status, headers: res.headers });
+  }
+
   const expected = env.SITE_PASSWORD;
   if (!expected) return next();
 
@@ -14,7 +29,7 @@ export async function onRequest(context) {
   // callback 網址，那個請求不會帶密碼 cookie，擋下來登入就壞了。
   // 這些路徑本來就要 Google 登入才拿得到資料（只有 /health 與 /api/auth/* 是公開的）
   const path = new URL(request.url).pathname;
-  if (path.startsWith("/api/") || path.startsWith("/mcp/") || path.startsWith("/oauth/")) return next();
+  if (path === "/mcp" || path.startsWith("/api/") || path.startsWith("/mcp/") || path.startsWith("/oauth/")) return next();
 
   const cookies = request.headers.get("Cookie") || "";
   const authed = cookies.split(";").some((c) => {
@@ -25,8 +40,9 @@ export async function onRequest(context) {
   if (authed) return next();
 
   if (request.method === "POST") {
-    const form = await request.formData();
-    const pass = form.get("password") || "";
+    // 不是表單送來的（例如 JSON）formData() 會丟例外變成 500，當成密碼錯處理
+    const form = await request.formData().catch(() => null);
+    const pass = form?.get("password") || "";
     if (pass === expected) {
       const headers = new Headers({ Location: "/" });
       headers.append(
