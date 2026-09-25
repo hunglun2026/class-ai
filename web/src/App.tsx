@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Courses from "./pages/Courses";
 import CourseWork from "./pages/CourseWork";
 import NewCourseWork from "./pages/NewCourseWork";
+import FeedbackStyle from "./pages/FeedbackStyle";
 import Grading from "./pages/Grading";
 import RubricSetup from "./pages/RubricSetup";
 
@@ -61,6 +62,9 @@ export default function App() {
           <span className="brand-name">classAI</span>
         </SafeLink>
         <div className="row">
+          <SafeLink to="/feedback-style" className="header-link">
+            評語風格
+          </SafeLink>
           <span className="teacher-name">{teacher.name}</span>
           <button
             className="secondary"
@@ -86,6 +90,7 @@ export default function App() {
           <Route path="/" element={<Courses />} />
           <Route path="/courses/:courseId" element={<CourseWork />} />
           <Route path="/courses/:courseId/new" element={<NewCourseWork />} />
+          <Route path="/feedback-style" element={<FeedbackStyle />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId/setup" element={<RubricSetup />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId" element={<Grading />} />
         </Routes>

@@ -15,6 +15,7 @@ import { ClassroomError } from "./lib/classroom";
 import { mcpAuthRoutes, mcpApiApp } from "./mcp-auth";
 import { runAutoGrade } from "./lib/autograde";
 import { inboxRoutes } from "./routes/inbox";
+import { styleRoutes } from "./routes/style";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -50,6 +51,7 @@ app.route("/api/calibration", calibrationRoutes);
 app.route("/api/rubric-templates", rubricTemplateRoutes);
 app.route("/api/usage", usageRoutes);
 app.route("/api/inbox", inboxRoutes);
+app.route("/api/feedback-style", styleRoutes);
 
 app.onError((err, c) => {
   // 前端送來的資料格式不對（zod 驗證沒過）是請求的問題不是系統壞了，回 400；細節只進 log

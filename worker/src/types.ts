@@ -60,3 +60,11 @@ export interface AiGradeResult {
   // AI 自己判斷學生內容裡有沒有人在對它下指令（例如要求給滿分）
   injectionSuspected?: boolean;
 }
+
+// v1.19.0 老師的評語風格（見 lib/feedback-style.ts）；沒設定時用 DEFAULT_STYLE，跟之前的評語一模一樣
+export interface FeedbackStyle {
+  format: "three" | "two" | "one";
+  tone: "warm" | "concise" | "lively";
+  length: "short" | "medium" | "long";
+  samples: string[];
+}

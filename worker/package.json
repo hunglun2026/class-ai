@@ -1,6 +1,6 @@
 {
   "name": "class-ai-worker",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "db:migrate:local": "wrangler d1 migrations apply class_ai_db --local",
     "db:migrate:remote": "wrangler d1 migrations apply class_ai_db --remote",
     "typecheck": "tsc --noEmit",
-    "test:it": "node -e \"require('fs').rmSync('.wrangler/state-it',{recursive:true,force:true})\" && wrangler d1 migrations apply class_ai_db --local --persist-to .wrangler/state-it && tsx --import ./test/cf-workers-stub.mjs test/answer-key-and-attachments.it.mts && tsx --import ./test/cf-workers-stub.mjs test/writeback.it.mts",
+    "test:it": "node -e \"require('fs').rmSync('.wrangler/state-it',{recursive:true,force:true})\" && wrangler d1 migrations apply class_ai_db --local --persist-to .wrangler/state-it && tsx --import ./test/cf-workers-stub.mjs test/answer-key-and-attachments.it.mts && tsx --import ./test/cf-workers-stub.mjs test/writeback.it.mts && tsx --import ./test/cf-workers-stub.mjs test/style-rubricgen.it.mts",
     "test:injection": "tsx --import ./test/cf-workers-stub.mjs test/prompt-injection.it.mts"
   },
   "dependencies": {

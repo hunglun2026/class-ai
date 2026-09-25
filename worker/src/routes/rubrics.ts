@@ -9,6 +9,7 @@ import { base64ToBytes } from "../lib/base64";
 import { getClassroomRubric, classroomRubricToItems } from "../lib/classroom";
 import { getValidAccessToken } from "../lib/tokens";
 import { watchCourseWork } from "../lib/sync";
+import { generateRubric } from "../lib/rubric-gen";
 
 export const rubricRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 rubricRoutes.use("*", requireAuth);
@@ -255,4 +256,28 @@ rubricRoutes.post("/", async (c) => {
   await watchCourseWork(c.env, teacherId, body.courseWorkId).catch((e) => console.error("[rubrics] 登記自動預批失敗", e));
 
   return c.json({ id: saved?.id ?? id });
+});
+
+const generateSchema = z.object({
+  mode: z.enum(["rubric", "freetext"]),
+  maxPoints: z.number().finite().positive().max(1000),
+  hint: z.string().max(300, "補充說明最多 300 字").optional(),
+});
+
+// v1.19.0 讓 AI 依作業標題與說明產生評分量表／評分要求：只回傳內容給前端填表，不存檔
+rubricRoutes.post("/:courseWorkId/generate", async (c) => {
+  const teacherId = c.get("teacherId");
+  const courseWorkId = c.req.param("courseWorkId");
+  if (!(await ownsCourseWork(c.env, teacherId, courseWorkId))) {
+    return c.json({ error: "找不到這份作業，或不屬於你" }, 404);
+  }
+  const parsed = generateSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "資料格式不對" }, 400);
+  const { mode, maxPoints, hint } = parsed.data;
+  if (mode === "rubric" && !Number.isInteger(maxPoints)) {
+    return c.json({ error: "總分要是整數，AI 才能幫你分配各項配分" }, 400);
+  }
+  const out = await generateRubric(c.env, teacherId, courseWorkId, mode, maxPoints, hint);
+  if (!out.ok) return c.json({ error: out.error, code: out.code }, out.status);
+  return c.json({ ...out.result, remainingToday: out.remainingToday });
 });

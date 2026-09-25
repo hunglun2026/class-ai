@@ -598,3 +598,21 @@ textarea:focus, input:focus, select:focus {
 .insights-tip { background: #f5f3ff; border-radius: 8px; padding: 6px 10px; }
 /* 出作業表單的欄位說明比較長，手機上要能換行（.field-label 預設不換行） */
 form.card .field-label.block { white-space: normal; }
+
+/* ---------- v1.19.0 AI 產生評分標準、評語風格 ---------- */
+.ai-gen { margin-top: 10px; }
+.ai-gen-panel { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.ai-gen-panel .row { margin-top: 8px; }
+.rubric-desc { grid-column: 1 / -1; font-size: 15px !important; min-height: 38px !important; padding: 6px 10px !important; margin-top: -4px; color: var(--ink-soft); }
+.header-link { font-size: 15px; color: var(--brand); text-decoration: none; padding: 6px 4px; white-space: nowrap; }
+.header-link:hover { text-decoration: underline; }
+.style-gap { margin-top: 20px; }
+.style-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.style-choice { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; flex: 1 1 180px; line-height: 1.5; background: #fff; }
+.style-choice.active { border-color: var(--brand); background: var(--brand-soft); }
+.style-choice input { margin-top: 4px; flex: none; }
+.style-choice > span { display: flex; flex-direction: column; }
+.sample-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+.style-preview { margin-top: 12px; padding: 12px; border-radius: 10px; background: #f8fafc; border: 1px dashed var(--line); }
+.style-preview-feedback { white-space: pre-wrap; margin: 6px 0 0; line-height: 1.8; }
+.style-choices.compact .style-choice { flex: 1 1 70px; justify-content: center; }

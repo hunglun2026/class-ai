@@ -76,6 +76,13 @@ function filenameFromHeader(header: string | null): string | undefined {
   }
 }
 
+export interface FeedbackStyle {
+  format: "three" | "two" | "one";
+  tone: "warm" | "concise" | "lively";
+  length: "short" | "medium" | "long";
+  samples: string[];
+}
+
 export interface ClassInsights {
   summary: string;
   strengths: string;
@@ -207,4 +214,23 @@ export const api = {
   saveRubricTemplate: (body: object) =>
     request<{ id: string }>("/api/rubric-templates", { method: "POST", body: JSON.stringify(body) }),
   deleteRubricTemplate: (id: string) => request(`/api/rubric-templates/${id}`, { method: "DELETE" }),
+
+  // v1.19.0 讓 AI 依作業標題與說明產生評分量表／評分要求（只回內容填表，不存檔）
+  generateRubric: (courseWorkId: string, body: { mode: "rubric" | "freetext"; maxPoints: number; hint?: string }) =>
+    request<{
+      mode: "rubric" | "freetext";
+      items?: { item: string; maxPoints: number; description: string }[];
+      instructions?: string;
+      remainingToday: number;
+    }>(`/api/rubrics/${courseWorkId}/generate`, { method: "POST", body: JSON.stringify(body) }),
+
+  // v1.19.0 評語風格（每位老師一套，套用在所有 AI 評分）
+  getFeedbackStyle: () => request<{ style: FeedbackStyle; isDefault: boolean }>("/api/feedback-style"),
+  saveFeedbackStyle: (style: FeedbackStyle) =>
+    request<{ style: FeedbackStyle }>("/api/feedback-style", { method: "PUT", body: JSON.stringify(style) }),
+  previewFeedbackStyle: (style: FeedbackStyle) =>
+    request<{ sampleAnswer: string; feedback: string; score: number; remainingToday: number }>("/api/feedback-style/preview", {
+      method: "POST",
+      body: JSON.stringify(style),
+    }),
 };

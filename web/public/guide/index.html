@@ -251,6 +251,8 @@
     <a href="#step3">設定評分標準</a>
     <a href="#step4">批改學生</a>
     <a href="#auto">自動預批</a>
+    <a href="#ai-rubric">AI 寫評分標準</a>
+    <a href="#style">評語風格</a>
     <a href="#writeback">分數送回</a>
     <a href="#after">批完之後</a>
     <a href="#record">登記成績</a>
@@ -323,7 +325,7 @@
     <div class="callout">
       評分失敗的卡片會變紅、直接寫出原因：額度暫時滿了就等幾分鐘按「只重評失敗的 N 位」；學生還沒交作業就等交了再更新；檔案讀不到就打開原檔自己批改。
     </div>
-    <p>AI 的評語固定分三段：【做得好】【可以更好】【下一步】，學生看得懂也知道要怎麼改。每張卡片可以：</p>
+    <p>AI 的評語預設分三段：【做得好】【可以更好】【下一步】（可以在「評語風格」改），學生看得懂也知道要怎麼改。每張卡片可以：</p>
     <ul class="btn-list">
       <li><b>完成批改</b>：這一位改好了，卡片收成一行，自動跳到下一位還沒完成的學生</li>
       <li><b>先存起來</b>：先存著，之後再回來改</li>
@@ -343,6 +345,29 @@
       <li><b>學生重交</b>：AI 建議你還沒動過的會自動重評；你改過或確認過的分數不會被蓋掉，列在「學生重交」讓你決定</li>
     </ul>
     <div class="callout">背景評分一樣算進你每天的 AI 次數。首頁出現「Google 授權過期」時，按「重新登入」就恢復。</div>
+  </section>
+
+  <section class="step" id="ai-rubric">
+    <div class="step-head"><span class="step-num">NEW</span><h2>讓 AI 幫你寫評分標準</h2></div>
+    <p>評分標準頁的範本旁邊，按「✨ 讓 AI 依作業內容幫我寫」。AI 會參考 Classroom 上這份作業的標題和說明，也可以再補一行年級或想看的重點。</p>
+    <ul class="btn-list">
+      <li><b>填項目算分數</b>：寫出 3～5 個評分項目、每項配分和給分說明，配分加起來一定等於總分</li>
+      <li><b>用文字寫要求</b>：寫一段評分要求</li>
+      <li><b>給分說明</b>：量表每一項下面都可以寫，說清楚什麼樣的作答拿多少，AI 評得更穩定</li>
+    </ul>
+    <div class="callout">結果只是填進表單，你看過、改好再按「儲存，開始批改」才算數；用 1 次 AI 次數。</div>
+  </section>
+
+  <section class="step" id="style">
+    <div class="step-head"><span class="step-num">NEW</span><h2>評語風格：讓評語像你寫的</h2></div>
+    <p>按頁首的「評語風格」，選 AI 寫評語的格式、語氣和長度：</p>
+    <ul class="btn-list">
+      <li><b>格式</b>：三段式（【做得好】【可以更好】【下一步】，預設）／兩段式／一段話（像手寫短評）</li>
+      <li><b>語氣</b>：溫暖鼓勵（預設）／簡潔直接／活潑親切</li>
+      <li><b>長度</b>：短／中（預設）／長</li>
+      <li><b>我平常寫的評語</b>：貼最多 3 則你以前寫給學生的評語，AI 會學你的用詞和口氣，但不會照抄</li>
+    </ul>
+    <div class="callout">先按「用這個設定試寫一則」看效果（用範例作答，不是你學生的作業）。儲存後，之後所有 AI 評分都照這個風格寫，包含背景自動預批；已經評好的不會重寫。</div>
   </section>
 
   <section class="step" id="writeback">
@@ -406,7 +431,7 @@
 
   <footer class="page">
     <p>功能怪怪的、有想法想改，直接回報就好。</p>
-    <p class="version">classAI v1.18.0 · 由鴻綸科技提供</p>
+    <p class="version">classAI v1.19.0 · 由鴻綸科技提供</p>
   </footer>
 
 </div>

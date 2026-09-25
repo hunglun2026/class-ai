@@ -7,6 +7,7 @@ import { computeConfidenceFlags, injectionFlag, computeRiskLevel } from "./confi
 import { checkAiQuota, recordAiUse } from "./usage";
 import { fetchCalibrationExamples } from "./calibration";
 import type { AttachmentRecord } from "./sync";
+import { loadFeedbackStyle } from "./feedback-style";
 
 // 一次評分所有要下載的檔案（標準答案檔＋學生附件）原始大小合計上限。Gemini 一次可收 100MB，
 // 但 Worker 只有 128MB 記憶體，原始位元組、base64、JSON 本體會同時存在，約吃掉 4 倍，20MB 是安全值
@@ -245,7 +246,9 @@ async function gradeLocked(
   try {
     const examples = await fetchCalibrationExamples(env.DB, rubric.id);
     const apiKeys = env.GEMINI_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean);
-    const { result, model } = await gradeSubmission(apiKeys, rubric, submission.content_text ?? "", extracted, examples);
+    // v1.19.0：照這位老師設定的評語風格（背景自動預批用登記接手的老師）
+    const style = await loadFeedbackStyle(env, teacherId);
+    const { result, model } = await gradeSubmission(apiKeys, rubric, submission.content_text ?? "", extracted, examples, undefined, style);
     // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數
     const remainingToday = await recordAiUse(env, teacherId);
     const now = Math.floor(Date.now() / 1000);

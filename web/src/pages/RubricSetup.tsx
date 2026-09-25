@@ -183,6 +183,11 @@ function RubricForm({
     { id: string; name: string; mode: Mode; max_points: number; created_at: number }[] | null
   >(null);
   const [templateBusy, setTemplateBusy] = useState(false);
+  // v1.19.0 讓 AI 依作業內容產生評分標準
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiHint, setAiHint] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
   const [templateError, setTemplateError] = useState("");
 
   // 讀老師在 Classroom 網頁已經設定好的量表：只在「這份作業還沒存過 classAI 自己的量表」時才問，
@@ -280,6 +285,26 @@ function RubricForm({
     setItems(t.items.map((i, idx) => ({ item: i.item, maxPoints: pts[idx] })));
     setAppliedTemplate(t.label);
   }
+
+  // AI 產生的內容只填進表單，老師看過、修改、按儲存才算數
+  async function generateWithAi() {
+    if (mode === "answer_key") return;
+    if (!confirmOverwriteContent()) return;
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const r = await api.generateRubric(courseWorkId, { mode, maxPoints, hint: aiHint.trim() || undefined });
+      if (r.mode === "rubric" && r.items?.length) setItems(r.items);
+      if (r.mode === "freetext" && r.instructions) setInstructions(r.instructions);
+      setAppliedTemplate("AI 依作業內容產生");
+      setAiOpen(false);
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
+  const aiBlocked = mode === "rubric" && (!Number.isInteger(maxPoints) || maxPoints < 1);
 
   async function applyMyTemplate(id: string) {
     setTemplateError("");
@@ -521,7 +546,46 @@ function RubricForm({
               </button>
             ))}
           </div>
-          {appliedTemplate && <p className="ok-text">已套用「{appliedTemplate}」範本，可以直接修改內容。</p>}
+          <div className="ai-gen">
+            {!aiOpen ? (
+              <button type="button" className="secondary small" onClick={() => setAiOpen(true)}>
+                ✨ 讓 AI 依作業內容幫我寫
+              </button>
+            ) : (
+              <div className="ai-gen-panel">
+                <label className="field-label block" htmlFor="ai-hint">
+                  補充年級或想看的重點（選填）
+                </label>
+                <input
+                  id="ai-hint"
+                  type="text"
+                  maxLength={300}
+                  placeholder="例如：五年級，重點看有沒有引用課文"
+                  value={aiHint}
+                  onChange={(e) => setAiHint(e.target.value)}
+                />
+                <p className="small-text muted">
+                  AI 會參考 Classroom 上這份作業的標題和說明，{mode === "rubric" ? "寫出 3～5 個評分項目、配分和給分說明" : "寫一段評分要求"}
+                  ，填進下面讓你改。用 1 次 AI 次數，不會自動儲存。
+                </p>
+                {aiBlocked && <p className="error-text">總分要是大於 0 的整數，AI 才能分配各項配分</p>}
+                {aiError && (
+                  <p className="error-text" role="alert">
+                    {aiError}
+                  </p>
+                )}
+                <div className="row">
+                  <button type="button" onClick={generateWithAi} disabled={aiBusy || aiBlocked}>
+                    {aiBusy ? "AI 撰寫中（約 10～20 秒）…" : "開始產生"}
+                  </button>
+                  <button type="button" className="ghost" onClick={() => setAiOpen(false)} disabled={aiBusy}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          {appliedTemplate && <p className="ok-text">已套用「{appliedTemplate}」，可以直接修改內容。</p>}
         </div>
       )}
 
@@ -574,6 +638,19 @@ function RubricForm({
               >
                 ✕
               </button>
+              <input
+                type="text"
+                className="rubric-desc"
+                aria-label={`第 ${i + 1} 項給分說明`}
+                placeholder="給分說明（選填），例如：完整說明且舉例得滿分；只說明沒舉例約一半"
+                maxLength={1000}
+                value={it.description ?? ""}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[i] = { ...next[i], description: e.target.value };
+                  setItems(next);
+                }}
+              />
             </div>
           ))}
           {itemProblems.map((p) => (
