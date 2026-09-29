@@ -26,6 +26,15 @@ export async function onRequest({ request, env }) {
     })
   );
 
+  // 後端用 502 表示「AI 這次沒寫出來」並附中文說明（JSON）。但 Cloudflare 邊緣看到 502／504 會把回應整個
+  // 換成英文的 "Bad gateway" 頁，老師只看到「請求失敗（502）」（2026-09-29 線上實測抓到）。
+  // 所以這裡把「後端自己回的 JSON 502／504」改成 424，中文說明才送得到；真的連不到後端時
+  // 回來的是 HTML 不是 JSON，不受影響，照舊。
+  let status = res.status;
+  if ((status === 502 || status === 504) && (res.headers.get("content-type") || "").includes("application/json")) {
+    status = 424;
+  }
+
   // Set-Cookie 等標頭原樣傳回；cookie 沒寫 Domain，瀏覽器就會記在 classai.hunglun.com 底下
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
+  return new Response(res.body, { status, statusText: status === res.status ? res.statusText : "Failed Dependency", headers: res.headers });
 }
