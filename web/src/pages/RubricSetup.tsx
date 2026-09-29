@@ -4,7 +4,7 @@ import { api } from "../api";
 import Stepper from "../components/Stepper";
 import SafeLink from "../components/SafeLink";
 import { setPending } from "../unsaved";
-import { TEMPLATES, splitPoints } from "../templates";
+import { SUBJECTS, TEMPLATES, splitPoints } from "../templates";
 
 export type Mode = "freetext" | "rubric" | "answer_key";
 
@@ -185,6 +185,8 @@ function RubricForm({
   const [templateBusy, setTemplateBusy] = useState(false);
   // v1.19.0 讓 AI 依作業內容產生評分標準
   const [aiOpen, setAiOpen] = useState(false);
+  // 範本依科目分組：先選科目再選範本兩個下拉，三十幾顆按鈕平鋪會擠成一團
+  const [tplSubject, setTplSubject] = useState<string>(SUBJECTS[0]);
   const [aiHint, setAiHint] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -539,12 +541,28 @@ function RubricForm({
       {mode !== "answer_key" && (
         <div className="template-bar">
           <span className="template-label">不知道怎麼寫？套用範本：</span>
-          <div className="chip-row">
-            {TEMPLATES.map((t) => (
-              <button key={t.key} type="button" className="chip" onClick={() => applyTemplate(t.key)}>
-                {t.label}
-              </button>
-            ))}
+          <div className="tpl-selects">
+            <select aria-label="範本科目" value={tplSubject} onChange={(e) => setTplSubject(e.target.value)}>
+              {SUBJECTS.map((sub) => (
+                <option key={sub} value={sub}>
+                  {sub}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="選一個範本套用"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) applyTemplate(e.target.value);
+              }}
+            >
+              <option value="">選一個範本…</option>
+              {TEMPLATES.filter((t) => t.subject === tplSubject).map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="ai-gen">
             {!aiOpen ? (
