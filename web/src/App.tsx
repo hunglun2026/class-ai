@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate } from "react-router-dom";
 import { api, ApiError, AUTH_LOST_EVENT } from "./api";
 import SafeLink from "./components/SafeLink";
 import { clearPending, confirmLeave } from "./unsaved";
+import { DialogHost } from "./dialog";
 import Login from "./pages/Login";
 import Courses from "./pages/Courses";
 import CourseWork from "./pages/CourseWork";
@@ -69,7 +70,7 @@ export default function App() {
           <button
             className="secondary"
             onClick={async () => {
-              if (!confirmLeave()) return;
+              if (!(await confirmLeave())) return;
               try {
                 await api.logout();
               } finally {
@@ -96,6 +97,7 @@ export default function App() {
         </Routes>
       </div>
       <VersionTag />
+      <DialogHost />
     </>
   );
 }

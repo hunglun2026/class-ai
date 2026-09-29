@@ -620,3 +620,14 @@ form.card .field-label.block { white-space: normal; }
 /* v1.20.0 範本依科目分組：兩個下拉並排，手機寬度自動上下疊 */
 .tpl-selects { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 10px; }
 .tpl-selects select { flex: 1 1 160px; min-height: 44px; }
+
+/* v1.20.1 自己的對話框（取代瀏覽器內建的 confirm／prompt） */
+.dlg-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(15, 23, 42, 0.5); }
+.dlg { width: 100%; max-width: 440px; background: #fff; border-radius: 16px; padding: 20px 20px 16px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3); }
+.dlg-title { margin: 0 0 8px; font-size: 20px; }
+.dlg-msg { margin: 0 0 14px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; }
+.dlg input[type="text"] { width: 100%; margin-bottom: 14px; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.dlg-actions button { min-height: 44px; min-width: 88px; }
+button.dlg-danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+button.dlg-danger:hover:not(:disabled) { background: #b91c1c; }

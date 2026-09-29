@@ -4,6 +4,7 @@ import { api } from "../api";
 import Stepper from "../components/Stepper";
 import SafeLink from "../components/SafeLink";
 import { setPending } from "../unsaved";
+import { askConfirm } from "../dialog";
 import { MODE_LABEL, type AssignmentState, type Mode } from "./RubricSetup";
 import { InsightsPanel, pushState, WritebackPanel } from "../components/GradingExtras";
 import { findSimilar, type SimilarMatch } from "../similarity";
@@ -288,11 +289,14 @@ export default function Grading() {
   async function gradeMany(list: Submission[], auto = false) {
     if (!list.length) return;
     if (!auto && remaining !== null && list.length > remaining) {
-      const ok = window.confirm(
-        remaining === 0
-          ? "今天的 AI 評分次數已經用完，明天會重置。你還是可以用「自己打分」繼續批改。"
-          : `今天只剩 ${remaining} 次 AI 評分，這次要評 ${list.length} 位，會先評前 ${remaining} 位，剩下的要等明天或自己打分。要繼續嗎？`
-      );
+      const ok = await askConfirm({
+        title: remaining === 0 ? "今天的 AI 次數用完了" : "今天的 AI 次數不夠",
+        message:
+          remaining === 0
+            ? "今天的 AI 評分次數已經用完，明天會重置。你還是可以用「自己打分」繼續批改。"
+            : `今天只剩 ${remaining} 次 AI 評分，這次要評 ${list.length} 位，會先評前 ${remaining} 位，剩下的要等明天或自己打分。要繼續嗎？`,
+        okText: remaining === 0 ? "知道了" : "繼續",
+      });
       if (!ok || remaining === 0) return;
     }
     const queue = [...list];

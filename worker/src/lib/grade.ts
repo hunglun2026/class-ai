@@ -8,6 +8,7 @@ import { checkAiQuota, recordAiUse } from "./usage";
 import { fetchCalibrationExamples } from "./calibration";
 import type { AttachmentRecord } from "./sync";
 import { loadFeedbackStyle } from "./feedback-style";
+import { gradeChoiceAnswers, CHOICE_MODEL_LABEL } from "./choice-grade";
 
 // 一次評分所有要下載的檔案（標準答案檔＋學生附件）原始大小合計上限。Gemini 一次可收 100MB，
 // 但 Worker 只有 128MB 記憶體，原始位元組、base64、JSON 本體會同時存在，約吃掉 4 倍，20MB 是安全值
@@ -226,9 +227,20 @@ async function gradeLocked(
     return { ok: false, status: 422, error, category: "permanent" };
   }
 
+  // 選擇題（標準答案是「1.B 2.A…」逐題選項）由程式比對，不打 AI、不扣次數：AI 數二十題會數錯
+  // （2026-09-29 實測答對 14／20 卻給 45 分）。有圖片／PDF 之類要 AI 看的附件，或答案表讀不出來，就照舊交給 AI
+  const choice =
+    rubric.mode === "answer_key" && !rubric.answerKeyFile && extracted.every((a) => a.kind === "text")
+      ? gradeChoiceAnswers(
+          rubric.answerKey,
+          [submission.content_text ?? "", ...extracted.map((a) => a.text ?? "")].join("\n"),
+          rubric.maxPoints
+        )
+      : null;
+
   // 用量上限：擋住一位老師把大家共用的 AI 額度吃光。放在這裡＝前面那些「根本不用打 AI」的情況不扣次數
   const quota = await checkAiQuota(env, teacherId);
-  if (!quota.ok) {
+  if (!quota.ok && !choice) {
     const error =
       quota.reason === "daily"
         ? `今天的 AI 評分次數用完了（每人每天 ${quota.dailyLimit} 次），明天會重置。你還是可以按「自己打分」繼續批改`
@@ -244,21 +256,24 @@ async function gradeLocked(
   }
 
   try {
-    const examples = await fetchCalibrationExamples(env.DB, rubric.id);
+    const examples = choice ? [] : await fetchCalibrationExamples(env.DB, rubric.id);
     const apiKeys = env.GEMINI_API_KEYS.split(",").map((k) => k.trim()).filter(Boolean);
     // v1.19.0：照這位老師設定的評語風格（背景自動預批用登記接手的老師）
-    const style = await loadFeedbackStyle(env, teacherId);
-    const { result, model } = await gradeSubmission(apiKeys, rubric, submission.content_text ?? "", extracted, examples, undefined, style);
-    // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數
-    const remainingToday = await recordAiUse(env, teacherId);
+    const style = choice ? undefined : await loadFeedbackStyle(env, teacherId);
+    const { result, model } = choice
+      ? { result: choice, model: CHOICE_MODEL_LABEL }
+      : await gradeSubmission(apiKeys, rubric, submission.content_text ?? "", extracted, examples, undefined, style);
+    // 真的打了 Gemini 且成功才計次：AI 自己失敗（額度、逾時）不扣老師的次數；程式比對的選擇題也不計
+    const remainingToday = choice ? quota.remainingToday : await recordAiUse(env, teacherId);
     const now = Math.floor(Date.now() / 1000);
-    const confidenceFlags = computeConfidenceFlags(rubric, result);
+    // 程式逐題比對不會「誤判」，不需要 AI 那套「0 分／滿分再看一眼」的提醒
+    const confidenceFlags = choice ? [] : computeConfidenceFlags(rubric, result);
     // 學生試圖對 AI 下指令（要求給滿分之類）：AI 自己的判斷＋後端句型比對，任一成立就警示
     const injection = injectionFlag(result, [
       submission.content_text ?? "",
       ...extracted.map((a) => (a.kind === "text" ? a.text ?? "" : "")),
     ]);
-    if (injection) confidenceFlags.unshift(injection);
+    if (injection && !choice) confidenceFlags.unshift(injection);
     // 有附件因為太大沒送給 AI：分數只根據其他內容，老師一定要知道
     if (tooLarge.length > 0) {
       confidenceFlags.push(`有 ${tooLarge.length} 個附件太大 AI 沒讀到（${tooLarge.join("、")}），這個分數沒有看過這些檔案`);
@@ -268,7 +283,7 @@ async function gradeLocked(
     }
     const confidenceFlagsJson = confidenceFlags.length > 0 ? JSON.stringify(confidenceFlags) : null;
     // 三色分流：見 lib/confidence.ts computeRiskLevel 的說明（不另外多打AI，用已經有的證據組合）
-    const riskLevel = computeRiskLevel(confidenceFlags, result.score, rubric.maxPoints, examples.length > 0);
+    const riskLevel = choice ? ("green" as const) : computeRiskLevel(confidenceFlags, result.score, rubric.maxPoints, examples.length > 0);
 
     await env.DB.batch([
       env.DB.prepare(

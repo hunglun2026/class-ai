@@ -4,6 +4,8 @@
  * - App 內換頁（上一步、左上角 logo、登出）：用 confirmLeave() 先問
  * BrowserRouter 沒有內建的換頁攔截（useBlocker 要 data router），所以自己做這一層。
  */
+import { askConfirm } from "./dialog";
+
 const pending = new Set<string>();
 
 export function setPending(key: string, on: boolean) {
@@ -21,9 +23,15 @@ export function hasPending(): boolean {
 }
 
 // 沒有待處理的東西就直接放行；有的話問老師，按「確定」才離開
-export function confirmLeave(): boolean {
+export async function confirmLeave(): Promise<boolean> {
   if (!pending.size) return true;
-  const ok = window.confirm("有修改還沒存，或 AI 還在評分中。確定要離開這一頁嗎？離開後沒存的修改會不見。");
+  const ok = await askConfirm({
+    title: "要離開這一頁嗎？",
+    message: "有修改還沒存，或 AI 還在評分中。離開後沒存的修改會不見。",
+    okText: "離開",
+    cancelText: "留在這裡",
+    danger: true,
+  });
   if (ok) pending.clear();
   return ok;
 }

@@ -4,6 +4,7 @@ import { api } from "../api";
 import Stepper from "../components/Stepper";
 import SafeLink from "../components/SafeLink";
 import { setPending } from "../unsaved";
+import { askConfirm, askText } from "../dialog";
 import { SUBJECTS, TEMPLATES, splitPoints } from "../templates";
 
 export type Mode = "freetext" | "rubric" | "answer_key";
@@ -267,18 +268,26 @@ function RubricForm({
   }, [dirty]);
 
   // 套用範本會蓋掉老師寫好的內容：有寫東西才問，空白或預設內容直接套
-  function confirmOverwriteContent(): boolean {
+  async function confirmOverwriteContent(): Promise<boolean> {
     const hasContent =
       (instructions.trim() && instructions !== DEFAULT_INSTRUCTIONS) ||
       items.some((it) => it.item.trim()) ||
       answerKey.trim();
-    return !hasContent || window.confirm("套用範本會取代你目前寫的評分內容，確定要套用嗎？");
+    return (
+      !hasContent ||
+      (await askConfirm({
+        title: "要取代目前的評分內容嗎？",
+        message: "套用範本會取代你目前寫的評分內容。",
+        okText: "取代",
+        danger: true,
+      }))
+    );
   }
 
-  function applyTemplate(key: string) {
+  async function applyTemplate(key: string) {
     const t = TEMPLATES.find((x) => x.key === key);
     if (!t) return;
-    if (!confirmOverwriteContent()) return;
+    if (!(await confirmOverwriteContent())) return;
     setInstructions(t.instructions);
     const pts = splitPoints(
       t.items.map((i) => i.weight),
@@ -291,7 +300,7 @@ function RubricForm({
   // AI 產生的內容只填進表單，老師看過、修改、按儲存才算數
   async function generateWithAi() {
     if (mode === "answer_key") return;
-    if (!confirmOverwriteContent()) return;
+    if (!(await confirmOverwriteContent())) return;
     setAiBusy(true);
     setAiError("");
     try {
@@ -310,7 +319,7 @@ function RubricForm({
 
   async function applyMyTemplate(id: string) {
     setTemplateError("");
-    if (!confirmOverwriteContent()) return;
+    if (!(await confirmOverwriteContent())) return;
     try {
       const { template: t } = await api.getRubricTemplate(id);
       setMode(t.mode);
@@ -332,7 +341,12 @@ function RubricForm({
   }
 
   async function saveAsTemplate() {
-    const name = window.prompt(`這個範本要取什麼名字？（例如：國一作文評分標準，最多 ${TEMPLATE_NAME_MAX} 個字）`)?.trim();
+    const name = await askText({
+      title: "幫這個範本取名字",
+      message: `例如：國一作文評分標準（最多 ${TEMPLATE_NAME_MAX} 個字）`,
+      maxLength: TEMPLATE_NAME_MAX,
+      okText: "儲存範本",
+    });
     if (!name) return;
     if (name.length > TEMPLATE_NAME_MAX) {
       setTemplateError(`範本名稱最多 ${TEMPLATE_NAME_MAX} 個字，請取短一點`);
@@ -482,8 +496,14 @@ function RubricForm({
                   type="button"
                   className="ghost icon-btn small"
                   aria-label={`刪除範本「${t.name}」`}
-                  onClick={() => {
-                    if (window.confirm(`刪除範本「${t.name}」？這個動作不能復原。`)) deleteMyTemplate(t.id);
+                  onClick={async () => {
+                    const ok = await askConfirm({
+                      title: "要刪除這個範本嗎？",
+                      message: `範本「${t.name}」刪除後不能復原。`,
+                      okText: "刪除",
+                      danger: true,
+                    });
+                    if (ok) deleteMyTemplate(t.id);
                   }}
                   disabled={templateBusy}
                 >
