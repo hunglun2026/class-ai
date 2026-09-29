@@ -28,7 +28,7 @@ const DEFAULT_INSTRUCTIONS =
 export const MODE_OPTIONS: { value: Mode; label: string; hint: string }[] = [
   { value: "freetext", label: "用文字寫要求", hint: "打幾句話告訴 AI 怎麼改，適合大部分作業" },
   { value: "rubric", label: "填項目算分數", hint: "分成幾個項目各自配分，例如作文" },
-  { value: "answer_key", label: "上傳檔案評分", hint: "有固定答案的題目，可以貼文字，或上傳照片、PDF、Word、Excel、純文字檔" },
+  { value: "answer_key", label: "上傳檔案評分", hint: "有固定答案的題目（填充、計算、簡答），可貼文字或上傳照片、PDF、Word、Excel。純選擇題用 Google 表單測驗更方便" },
 ];
 
 export const MODE_LABEL: Record<Mode, string> = {
