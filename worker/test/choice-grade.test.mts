@@ -19,4 +19,8 @@ check("題數不足 3 題的標準答案不啟用（交給 AI）", gradeChoiceAn
 check("有長篇解說的標準答案不啟用", gradeChoiceAnswers("1.A 因為光沿直線前進所以影子和物體形狀相同，這是課本第三章重點，請同學務必背熟 2.B 3.C 4.D", "1.A 2.B 3.C 4.D", 10) === null);
 check("學生作答讀不出題號（例如手寫照片轉字）交給 AI", gradeChoiceAnswers(key, "我覺得都是乙", 100) === null);
 check("總分 0 或沒標準答案不啟用", gradeChoiceAnswers(key, stu, 0) === null && gradeChoiceAnswers("", stu, 100) === null);
+check("沒寫題號、一串字母照順序對", gradeChoiceAnswers("1.B 2.A 3.C 4.D", "B A C C", 40)?.score === 30);
+check("沒寫題號、一行一個字母", gradeChoiceAnswers("1.B 2.A 3.C", "B\nA\nC", 30)?.score === 30);
+check("沒寫題號但數量對不上，退回 AI", gradeChoiceAnswers("1.B 2.A 3.C 4.D", "B A C", 40) === null);
+check("沒寫題號又夾雜其他文字，退回 AI", gradeChoiceAnswers("1.B 2.A 3.C", "我選 B 然後 A 還有 C", 30) === null);
 console.log(`\n${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);

@@ -5,6 +5,7 @@ import Stepper from "../components/Stepper";
 import SafeLink from "../components/SafeLink";
 import { setPending } from "../unsaved";
 import { askConfirm } from "../dialog";
+import { PhraseBar, RewriteBar } from "../components/FeedbackTools";
 import { MODE_LABEL, type AssignmentState, type Mode } from "./RubricSetup";
 import { InsightsPanel, pushState, WritebackPanel } from "../components/GradingExtras";
 import { findSimilar, type SimilarMatch } from "../similarity";
@@ -123,6 +124,9 @@ export default function Grading() {
   // v1.18.0：這份作業能不能把分數送回 Classroom（classAI 出的才行）、老師有沒有給寫入權限
   const [writeback, setWriteback] = useState<{ canWriteBack: boolean; canWrite: boolean }>({ canWriteBack: false, canWrite: false });
   const [insightsKey, setInsightsKey] = useState(0);
+  const [confirming, setConfirming] = useState<{ done: number; total: number } | null>(null);
+  const [confirmMsg, setConfirmMsg] = useState("");
+  const [nameQuery, setNameQuery] = useState("");
   // 今天還能讓 AI 評幾份（所有老師共用一把 AI 金鑰，每人每天有上限）
   const [remaining, setRemaining] = useState<number | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -346,7 +350,45 @@ export default function Grading() {
     if (filter === "failed") return !!failures[s.id];
     if (filter === "resubmitted") return isResubmitted(s);
     return true;
-  });
+  }).filter((s) => !nameQuery.trim() || s.student_name.toLowerCase().includes(nameQuery.trim().toLowerCase()));
+
+  // v1.21.0 一鍵確認全部綠燈：只動「AI 建議、老師還沒碰、三色是綠」的，逐位送出，跟老師一位一位按「完成批改」同一條 API
+  async function confirmGreens() {
+    const greens = list.filter((s) => s.status === "ai_suggested" && s.risk_level === "green" && s.locked !== 1);
+    if (!greens.length) return;
+    const lines = greens.slice(0, 8).map((s) => `${s.student_name}　${s.final_score ?? s.ai_score} 分`);
+    const more = greens.length > 8 ? `…另外還有 ${greens.length - 8} 位` : "";
+    const ok = await askConfirm({
+      title: `確認這 ${greens.length} 位的分數嗎？`,
+      message: ["AI 給的分數和評語都會照原樣確認，之後仍可解鎖修改。", "", ...lines, more].join("\n"),
+      okText: `確認 ${greens.length} 位`,
+    });
+    if (!ok) return;
+    setConfirmMsg("");
+    let done = 0;
+    const failed: string[] = [];
+    setConfirming({ done: 0, total: greens.length });
+    for (const s of greens) {
+      try {
+        await api.updateGrade(s.id, {
+          finalScore: Number(s.final_score ?? s.ai_score),
+          finalFeedback: s.final_feedback ?? s.ai_feedback ?? "",
+          confirm: true,
+        });
+      } catch {
+        failed.push(s.student_name);
+      }
+      done += 1;
+      setConfirming({ done, total: greens.length });
+    }
+    setConfirming(null);
+    await refreshSubmissions();
+    setConfirmMsg(
+      failed.length
+        ? `已確認 ${greens.length - failed.length} 位，有 ${failed.length} 位沒成功（${failed.join("、")}），可以個別再按「完成批改」。`
+        : `已確認 ${greens.length} 位。`
+    );
+  }
 
   function goTo(id: string | undefined, focusFeedback = false) {
     if (!id) return;
@@ -367,6 +409,24 @@ export default function Grading() {
     );
     goTo(next?.id, true);
   }
+
+  // Alt＋←／→ 上一位／下一位（用 Alt 是為了不搶輸入框裡游標移動的方向鍵）
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+      const cards = visible.map((s) => cardRefs.current[s.id]).filter(Boolean) as HTMLDivElement[];
+      if (!cards.length) return;
+      const mid = window.innerHeight / 3;
+      let idx = cards.findIndex((el) => el.getBoundingClientRect().bottom > mid);
+      if (idx < 0) idx = cards.length - 1;
+      const target = visible[Math.min(cards.length - 1, Math.max(0, idx + (e.key === "ArrowRight" ? 1 : -1)))];
+      e.preventDefault();
+      goTo(target?.id, true);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const maxPoints = rubric?.maxPoints ?? rubric?.max_points ?? assignment?.maxPoints ?? 100;
   // v1.18.0 同學作答雷同提醒：對照標準答案的作業大家答對本來就會很像，不比
@@ -441,6 +501,11 @@ export default function Grading() {
           {counts.review > 0 && (
             <div className="risk-summary" aria-label="AI 評分結果的三色分流">
               <span className="risk-chip risk-green">🟢 {counts.greenCount} 可直接確認</span>
+              {counts.greenCount > 0 && (
+                <button className="small" onClick={confirmGreens} disabled={!!confirming || !!batch}>
+                  {confirming ? `確認中 ${confirming.done}／${confirming.total}…` : `一鍵確認 ${counts.greenCount} 位`}
+                </button>
+              )}
               <span className="risk-chip risk-yellow">🟡 {counts.yellowCount} 建議看一下</span>
               <span className="risk-chip risk-red">🔴 {counts.redCount} 需要確認</span>
             </div>
@@ -480,6 +545,11 @@ export default function Grading() {
             {remaining === 0
               ? "今天的 AI 評分次數已經用完，明天會重置。還是可以用每位學生卡片上的「自己打分」繼續批改。"
               : `今天還可以讓 AI 評 ${remaining} 份（每位老師每天都有上限，避免一個人把大家共用的 AI 額度用光）。`}
+          </p>
+        )}
+        {confirmMsg && (
+          <p className="small-text muted" role="status">
+            {confirmMsg}
           </p>
         )}
         {batch && (
@@ -538,6 +608,17 @@ export default function Grading() {
             </button>
           ))}
         </div>
+      )}
+
+      {list.length > 5 && (
+        <input
+          type="search"
+          className="name-search"
+          placeholder="輸入學生姓名快速找"
+          aria-label="搜尋學生姓名"
+          value={nameQuery}
+          onChange={(e) => setNameQuery(e.target.value)}
+        />
       )}
 
       {submissions === null && !error && <p className="muted">{syncing ? "正在從 Classroom 抓學生繳交…" : "載入中…"}</p>}
@@ -714,6 +795,27 @@ function SubmissionCard({
     }
     setConfirmOverwrite(false);
     onAiGrade(submission.status === "teacher_edited");
+  }
+
+  // 常用評語：插在游標處（沒聚焦就接在最後），插完把游標放回句子後面
+  function insertPhrase(text: string) {
+    const el = document.getElementById(`fb-${submission.id}`) as HTMLTextAreaElement | null;
+    const start = el && el.selectionStart != null ? el.selectionStart : feedback.length;
+    const end = el && el.selectionEnd != null ? el.selectionEnd : start;
+    const before = feedback.slice(0, start);
+    setFeedback(before + text + feedback.slice(end));
+    const pos = (before + text).length;
+    setTimeout(() => {
+      el?.focus({ preventScroll: true });
+      el?.setSelectionRange(pos, pos);
+    }, 0);
+  }
+
+  // 快速加減分：空白當 0，不超出 0～滿分；小數（0.5 分）也不會被弄成長長的浮點數
+  function nudgeScore(delta: number) {
+    const cur = Number.isFinite(Number(scoreText)) && scoreText.trim() !== "" ? Number(scoreText) : 0;
+    const next = Math.min(maxPoints, Math.max(0, Math.round((cur + delta) * 100) / 100));
+    setScoreText(String(next));
   }
 
   async function save(confirm: boolean) {
@@ -934,6 +1036,22 @@ function SubmissionCard({
               className="input-short"
             />
             <span className="muted">／ {maxPoints}</span>
+            {!locked && (
+              <span className="score-quick" aria-label="快速調分">
+                <button type="button" className="ghost small" onClick={() => nudgeScore(-1)} aria-label="減 1 分">
+                  −1
+                </button>
+                <button type="button" className="ghost small" onClick={() => nudgeScore(1)} aria-label="加 1 分">
+                  ＋1
+                </button>
+                <button type="button" className="ghost small" onClick={() => setScoreText(String(maxPoints))}>
+                  滿分
+                </button>
+                <button type="button" className="ghost small" onClick={() => setScoreText("0")}>
+                  0 分
+                </button>
+              </span>
+            )}
           </div>
           {scoreError && (triedSave || scoreText !== savedScoreText) && (
             <p className="error-text" id={`score-err-${submission.id}`} role="alert">
@@ -979,6 +1097,18 @@ function SubmissionCard({
               }
             }}
           />
+          {!locked && (
+            <>
+              <PhraseBar onInsert={insertPhrase} />
+              <RewriteBar
+                feedback={feedback}
+                score={scoreNum}
+                maxPoints={maxPoints}
+                onResult={(t) => setFeedback(t)}
+                disabled={saving || busy}
+              />
+            </>
+          )}
           {saveError && <p className="error-text">{saveError}</p>}
           {unlockError && <p className="error-text">{unlockError}</p>}
           {locked ? (
@@ -1053,7 +1183,7 @@ function SubmissionCard({
             </div>
           )}
           <div className="hint-line muted">
-            {locked ? "這筆已確認鎖定，AI 重評與直接編輯都要先解鎖" : "電腦上可以按 Ctrl＋Enter 完成並跳到下一位"}
+            {locked ? "這筆已確認鎖定，AI 重評與直接編輯都要先解鎖" : "電腦上可以按 Ctrl＋Enter 完成並跳到下一位，Alt＋←／→ 切換學生"}
             {submission.ai_model && `｜AI 模型：${submission.ai_model}`}
           </div>
         </div>

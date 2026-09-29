@@ -16,6 +16,8 @@ import { mcpAuthRoutes, mcpApiApp } from "./mcp-auth";
 import { runAutoGrade } from "./lib/autograde";
 import { inboxRoutes } from "./routes/inbox";
 import { styleRoutes } from "./routes/style";
+import { phraseRoutes } from "./routes/phrases";
+import { rewriteRoutes } from "./routes/rewrite";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -52,6 +54,8 @@ app.route("/api/rubric-templates", rubricTemplateRoutes);
 app.route("/api/usage", usageRoutes);
 app.route("/api/inbox", inboxRoutes);
 app.route("/api/feedback-style", styleRoutes);
+app.route("/api/phrases", phraseRoutes);
+app.route("/api/feedback-rewrite", rewriteRoutes);
 
 app.onError((err, c) => {
   // 前端送來的資料格式不對（zod 驗證沒過）是請求的問題不是系統壞了，回 400；細節只進 log

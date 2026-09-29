@@ -631,3 +631,13 @@ form.card .field-label.block { white-space: normal; }
 .dlg-actions button { min-height: 44px; min-width: 88px; }
 button.dlg-danger { background: #dc2626; border-color: #dc2626; color: #fff; }
 button.dlg-danger:hover:not(:disabled) { background: #b91c1c; }
+
+/* v1.21.0 分數快調、姓名搜尋 */
+.score-quick { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
+.score-quick button { min-height: 36px; padding: 2px 10px; }
+.name-search { width: 100%; max-width: 360px; margin: 4px 0 12px; }
+
+/* v1.21.0 常用評語庫、評語一鍵調整 */
+.phrase-bar, .rewrite-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.phrase-row { margin-top: 0; gap: 6px; }
+.phrase-bar .chip { min-height: 36px; padding: 4px 12px; font-size: 15px; }

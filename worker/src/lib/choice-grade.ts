@@ -33,8 +33,17 @@ export function gradeChoiceAnswers(answerKey: string | undefined | null, student
   if (!answerKey || !(maxPoints > 0)) return null;
   const key = parse(answerKey);
   if (key.answers.size < 3 || key.coverage < 0.5) return null;
-  const stu = parse(studentText);
-  if (stu.answers.size === 0) return null;
+  let stu = parse(studentText);
+  if (stu.answers.size === 0) {
+    // 學生沒寫題號（只寫「B A C D…」或一行一個字母）：照順序當第 1、2、3 題。
+    // 只在整段文字「全都是選項字母」而且數量剛好等於題數時才採信，數量對不上就退回 AI，免得錯位還給分
+    const letters = studentText.normalize("NFKC").match(/[A-Ha-h]/g) ?? [];
+    const onlyLetters = studentText.normalize("NFKC").replace(/[A-Ha-h\s,、，.;；:：)）\-]/g, "").length === 0;
+    if (!onlyLetters || letters.length !== key.answers.size) return null;
+    const ordered = new Map<number, string>();
+    [...key.answers.keys()].sort((a, b) => a - b).forEach((q, i) => ordered.set(q, letters[i].toUpperCase()));
+    stu = { answers: ordered, coverage: 1 };
+  }
 
   const nums = [...key.answers.keys()].sort((a, b) => a - b);
   const wrong: string[] = [];

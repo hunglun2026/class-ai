@@ -199,6 +199,12 @@ export const api = {
     downloadFile(`/api/submissions/${courseWorkId}/export.xlsx`, "成績表.xlsx"),
   updateGrade:(submissionId: string, body: { finalScore: number; finalFeedback: string; confirm: boolean }) =>
     request(`/api/submissions/${submissionId}/grade`, { method: "PATCH", body: JSON.stringify(body) }),
+  // v1.21.0 常用評語庫、評語一鍵調整
+  listPhrases: () => request<{ phrases: { id: string; text: string }[] }>("/api/phrases"),
+  addPhrase: (text: string) => request<{ id: string; text: string }>("/api/phrases", { method: "POST", body: JSON.stringify({ text }) }),
+  deletePhrase: (id: string) => request<{ ok: true }>(`/api/phrases/${id}`, { method: "DELETE" }),
+  rewriteFeedback: (body: { action: "shorter" | "warmer" | "stricter" | "onepara"; feedback: string; score: number; maxPoints: number }) =>
+    request<{ feedback: string; remainingToday: number }>("/api/feedback-rewrite", { method: "POST", body: JSON.stringify(body) }),
   unlockGrade: (submissionId: string) => request(`/api/submissions/${submissionId}/unlock`, { method: "POST" }),
   gradeHistory: (submissionId: string) =>
     request<{
