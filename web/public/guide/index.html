@@ -254,6 +254,7 @@
     <a href="#ai-rubric">AI 寫評分標準</a>
     <a href="#style">評語風格</a>
     <a href="#writeback">分數送回</a>
+    <a href="#walkthrough">走一遍</a>
     <a href="#after">批完之後</a>
     <a href="#record">登記成績</a>
     <a href="#faq">常見問題</a>
@@ -388,6 +389,23 @@
     <div class="callout">評語 Google 沒開放寫入，請用每位的「複製分數與評語」貼到 Classroom。在 Classroom 自己建的作業，照樣用「複製全班分數」或下載 Excel。</div>
   </section>
 
+  <section class="step" id="walkthrough">
+    <div class="step-head"><span class="step-num">NEW</span><h2>實際走一遍：從出作業到在 Classroom 看到草稿分數</h2></div>
+    <p>2026-09-29 用真的老師和學生帳號從頭到尾走過一次，照著做就能重現：</p>
+    <ol>
+      <li>選好課程，按「＋ 在 classAI 出新作業」。第一次會看到「要多允許一項 Google 權限」的說明，按「前往 Google 允許」，在 Google 頁面同意後會自動回來</li>
+      <li>填標題（例如「第三課閱讀心得」）、說明、滿分，選「直接發布」，按「建立作業，下一步設定評分標準」</li>
+      <li>評分標準頁按「✨ 讓 AI 依作業內容幫我寫」，再按「開始產生」，約十幾秒。看過、想改就改，再按「儲存，開始批改」。如果表單裡已經有內容，會先跳出「會取代你目前寫的評分內容，確定嗎」，按確定才會產生</li>
+      <li>學生到 Classroom 繳交。Google 文件、圖片、PDF 都可以</li>
+      <li>回 classAI 批改頁，按「更新學生繳交」。classAI 先批好的會出現在「等你確認」</li>
+      <li>看 AI 的分數和評語，要改就直接改，然後按「完成批改」。AI 給滿分時卡片會提醒「建議確認是不是誤判」，這不是出錯，是請你多看一眼</li>
+      <li>按「把已確認的 N 位分數送到 Classroom」，出現「已送 N 位」，卡片上會標「已送 Classroom」</li>
+      <li>到 Classroom 這份作業的「學生的作業」頁，學生旁邊會看到分數加上「草稿」字樣（例如「10，滿分為 10」）。確認沒問題再按「發還」，學生才看得到</li>
+      <li>評語要每位按「複製分數與評語」，貼到 Classroom 的私人留言。Google 不開放外部工具寫評語</li>
+    </ol>
+    <div class="callout">想刪掉不要的作業：在 Classroom 那份作業頁右上角三個點，選「刪除」。classAI 不會幫你刪 Classroom 上的東西。</div>
+  </section>
+
   <section class="step" id="after">
     <div class="step-head"><span class="step-num">NEW</span><h2>批完之後：全班常見問題、雷同提醒</h2></div>
     <ul class="btn-list">
@@ -416,6 +434,11 @@
     <div class="faq-item">
       <p class="q">學生附件是圖片或掃描的手寫作業，AI 看得懂嗎？</p>
       <p class="a">看得懂，圖片和 PDF 都會直接給 AI 讀。但字跡潦草、掃描品質差時準確度會下降，更需要你自己看過再確認。</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="q">按了 AI 功能，出現「AI 這次沒寫出來，請再按一次」？</p>
+      <p class="a">多半是 Gemini 剛好沒回，或當下的額度暫時滿了。等一兩分鐘再按一次就好。這則說明從 v1.19.1 起才能正常顯示；更早的版本會被網站擋成只有「請求失敗（502）」，意思一樣。</p>
     </div>
 
     <div class="faq-item">
