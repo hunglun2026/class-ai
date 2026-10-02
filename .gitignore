@@ -4,3 +4,6 @@ dist/
 .dev.vars
 *.log
 *.tsbuildinfo
+.env
+.env.local
+.secrets/

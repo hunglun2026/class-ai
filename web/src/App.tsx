@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import { api, ApiError, AUTH_LOST_EVENT } from "./api";
 import SafeLink from "./components/SafeLink";
@@ -6,11 +6,31 @@ import { clearPending, confirmLeave } from "./unsaved";
 import { DialogHost } from "./dialog";
 import Login from "./pages/Login";
 import Courses from "./pages/Courses";
-import CourseWork from "./pages/CourseWork";
-import NewCourseWork from "./pages/NewCourseWork";
-import FeedbackStyle from "./pages/FeedbackStyle";
-import Grading from "./pages/Grading";
-import RubricSetup from "./pages/RubricSetup";
+// 首頁以外的頁面用到才下載，首頁開得快；評分標準頁含 34 個範本，最大塊。
+// 發新版後舊分頁會去抓已不存在的舊檔名（Pages 回首頁 HTML，載入失敗），
+// 這時自動重新整理一次拿新版；sessionStorage 記一下，避免真的壞掉時無限重整
+const RELOAD_KEY = "classai-chunk-reload";
+function lazyPage<T extends { default: React.ComponentType }>(load: () => Promise<T>) {
+  return lazy(() =>
+    load()
+      .then((m) => {
+        try { sessionStorage.removeItem(RELOAD_KEY); } catch {}
+        return m;
+      })
+      .catch((e) => {
+        let reloaded = false;
+        try { reloaded = sessionStorage.getItem(RELOAD_KEY) === "1"; sessionStorage.setItem(RELOAD_KEY, "1"); } catch {}
+        if (reloaded) throw e;
+        window.location.reload();
+        return new Promise<T>(() => {});
+      })
+  );
+}
+const CourseWork = lazyPage(() => import("./pages/CourseWork"));
+const NewCourseWork = lazyPage(() => import("./pages/NewCourseWork"));
+const FeedbackStyle = lazyPage(() => import("./pages/FeedbackStyle"));
+const Grading = lazyPage(() => import("./pages/Grading"));
+const RubricSetup = lazyPage(() => import("./pages/RubricSetup"));
 
 interface Teacher {
   id: string;
@@ -87,6 +107,7 @@ export default function App() {
         <span>由鴻綸科技提供</span>
       </a>
       <div className="container">
+        <Suspense fallback={<div className="muted">載入中…</div>}>
         <Routes>
           <Route path="/" element={<Courses />} />
           <Route path="/courses/:courseId" element={<CourseWork />} />
@@ -95,6 +116,7 @@ export default function App() {
           <Route path="/courses/:courseId/coursework/:courseWorkId/setup" element={<RubricSetup />} />
           <Route path="/courses/:courseId/coursework/:courseWorkId" element={<Grading />} />
         </Routes>
+        </Suspense>
       </div>
       <VersionTag />
       <DialogHost />
