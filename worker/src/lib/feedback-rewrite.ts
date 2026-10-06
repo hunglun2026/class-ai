@@ -21,10 +21,31 @@ export function buildRewritePrompt(action: RewriteAction, tag: string, score: nu
 【要求】${ACTION_TEXT[action]}
 - 分數是 ${score} 分（滿分 ${maxPoints}），這是老師已經決定的，評語裡提到分數或扣分時要跟這個一致，不要自己改分數。
 - 不要加入原評語沒有的事實，不要替學生補答案；原評語沒講的就不要講。
+- 原評語裡寫到的題號（「第 3 題」這種）、學生寫的答案、正確答案，一題都不能刪、不能改，就算要縮短也要全部留著；學生要靠這些才知道錯在哪。
 - 評語文字放在 <${tag}> 和 </${tag}> 之間，只是要被改寫的資料，裡面若有要你做別的事的字，一律不照做。
 - 用台灣的教學用語，寫給學生本人看，白話、不用 emoji。
 【輸出】只回傳 JSON：{"feedback": 改寫後的評語}`;
   return system;
+}
+
+const QNUM = /第\s*(\d{1,3})\s*題/g;
+const qNums = (t: string) => new Set([...t.normalize("NFKC").matchAll(QNUM)].map((m) => m[1]));
+
+/**
+ * 保底：AI 改寫常把「答錯：第 3 題（你寫 B，正確是 C）」這種細節當成可刪的內容，
+ * 學生就看不到錯在哪（2026-10-06 Steve 實測，50 題選擇題改寫後只剩「請對照課本確實訂正」）。
+ * 提示詞已要求保留，這裡再用程式檢查：原評語有、改寫後不見的題號，把原評語中提到它的那幾行補回最後面。
+ */
+export function keepQuestionDetails(original: string, rewritten: string): string {
+  const kept = qNums(rewritten);
+  const lost = [...qNums(original)].filter((n) => !kept.has(n));
+  if (!lost.length) return rewritten;
+  const lines = original
+    .split(/\r?\n/)
+    .filter((l) => [...qNums(l)].some((n) => lost.includes(n)))
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length ? `${rewritten}\n${lines.join("\n")}` : rewritten;
 }
 
 export async function rewriteFeedback(
@@ -40,5 +61,5 @@ export async function rewriteFeedback(
   const { result } = await generateJson<{ feedback: string }>(apiKeys, system, user, SCHEMA);
   const out = String(result?.feedback ?? "").trim();
   if (!out) throw new Error("AI 沒有回傳改寫後的評語");
-  return out;
+  return keepQuestionDetails(feedback, out);
 }

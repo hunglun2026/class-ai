@@ -1,5 +1,6 @@
 // 選擇題逐題比對的純函式測試：npx tsx test/choice-grade.test.mts
 import { gradeChoiceAnswers } from "../src/lib/choice-grade.ts";
+import { keepQuestionDetails } from "../src/lib/feedback-rewrite.ts";
 let pass = 0, fail = 0;
 const check = (l: string, ok: boolean, d = "") => { ok ? pass++ : fail++; console.log(`${ok ? "PASS" : "FAIL"}  ${l}${!ok && d ? "\n      → " + d : ""}`); };
 
@@ -23,4 +24,13 @@ check("沒寫題號、一串字母照順序對", gradeChoiceAnswers("1.B 2.A 3.C
 check("沒寫題號、一行一個字母", gradeChoiceAnswers("1.B 2.A 3.C", "B\nA\nC", 30)?.score === 30);
 check("沒寫題號但數量對不上，退回 AI", gradeChoiceAnswers("1.B 2.A 3.C 4.D", "B A C", 40) === null);
 check("沒寫題號又夾雜其他文字，退回 AI", gradeChoiceAnswers("1.B 2.A 3.C", "我選 B 然後 A 還有 C", 30) === null);
+
+// AI 改寫評語時把題號刪掉的保底（2026-10-06 實測：改寫後只剩「請對照課本確實訂正」）
+const lostAll = keepQuestionDetails(r.feedback, "這次作業 70 分。內容有遺漏與錯誤，請對照課本確實訂正。");
+check("改寫刪光題號：錯題與漏題補回", lostAll.includes("第 4 題（你寫 A，正確是 B）") && lostAll.includes("第 20 題") && lostAll.includes("沒寫：第 8 題"), lostAll);
+check("改寫刪光題號：不補第一行總結", !lostAll.includes("共 20 題"), lostAll);
+const keptAll = "70 分。錯第 4 題、第 9 題、第 12 題、第 17 題、第 20 題，漏第 8 題。";
+check("題號都還在：原樣不動", keepQuestionDetails(r.feedback, keptAll) === keptAll);
+check("第 1 題不會被當成第 12 題留著", keepQuestionDetails("答錯：第 1 題。", "答錯：第 12 題。").includes("答錯：第 1 題。"));
+check("原評語沒題號（作文）：原樣不動", keepQuestionDetails("文章結構清楚。", "結構很清楚！") === "結構很清楚！");
 console.log(`\n${pass} 通過，${fail} 失敗`); process.exit(fail ? 1 : 0);

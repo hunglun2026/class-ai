@@ -79,7 +79,8 @@ console.log("\n== 二十、評語一鍵調整 ==");
   const sent = geminiCalls.at(-1);
   const sys = sent.systemInstruction.parts[0].text as string;
   const usr = sent.contents[0].parts[0].text as string;
-  check("20-1 成功：回改寫後評語", r.status === 200 && r.json?.feedback === "改寫後的評語", r.text);
+  // 假 AI 回的「改寫後的評語」把題號都刪了，保底會把原評語提到題號的那行補在後面
+  check("20-1 成功：回改寫後評語，刪掉的題號補回", r.status === 200 && r.json?.feedback === "改寫後的評語\n第 1 題很好。第 2 題有迷思。第 3 題答非所問。", r.text);
   check("20-2 指令帶了動作、分數與滿分", sys.includes("縮短") && sys.includes("13 分") && sys.includes("滿分 30"), sys);
   check("20-3 評語放在隨機邊界標籤裡當資料", /<fb_[0-9a-f]{12}>/.test(usr) && usr.includes("第 2 題有迷思"), usr);
   check("20-4 扣了 1 次 AI", typeof r.json?.remainingToday === "number");
