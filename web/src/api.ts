@@ -167,9 +167,9 @@ export const api = {
     request<{ submissions: any[]; autoSyncedAt?: number | null; canWriteBack?: boolean; canWrite?: boolean }>(
       `/api/submissions/${courseWorkId}`
     ),
-  // v1.18.0 把老師確認過的分數送回 Classroom 草稿分數；一次最多 40 位，remaining>0 要接著送
+  // v1.22.0 一鍵發還（正式分數＋評語連結＋發還）；一次最多 15 位，remaining>0 要接著送
   pushGrades: (courseWorkId: string) =>
-    request<{ pushed: number; failed: { name: string; reason: string }[]; remaining: number; notConfirmed: number }>(
+    request<{ pushed: number; failed: { name: string; reason: string }[]; remaining: number; notConfirmed: number; linkBlocked: boolean }>(
       `/api/submissions/${courseWorkId}/push-grades`,
       { method: "POST" }
     ),

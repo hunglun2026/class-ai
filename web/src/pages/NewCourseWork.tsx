@@ -80,7 +80,7 @@ export default function NewCourseWork() {
       <div className="page-head">
         <div className="eyebrow">第 2 步</div>
         <h1 className="page-title">在 classAI 出一份新作業</h1>
-        <p className="page-sub">作業會出現在你的 Classroom 課程裡，學生照常在 Classroom 繳交。批完之後，分數可以一鍵送回 Classroom。</p>
+        <p className="page-sub">作業會出現在你的 Classroom 課程裡，學生照常在 Classroom 繳交。批完之後，分數和評語可以一鍵發還給學生。</p>
       </div>
 
       {error && (
@@ -99,7 +99,7 @@ export default function NewCourseWork() {
             </p>
           )}
           <p>
-            classAI 平常只讀取你的 Classroom。要幫你<strong>出作業</strong>、把你確認過的分數<strong>送回 Classroom</strong>，
+            classAI 平常只讀取你的 Classroom。要幫你<strong>出作業</strong>、把你確認過的分數<strong>發還給學生</strong>，
             需要多允許一項「查看、建立及編輯課程作業」。
           </p>
           <ul className="plain-list">

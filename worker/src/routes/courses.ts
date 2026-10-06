@@ -72,6 +72,16 @@ courseRoutes.get("/:courseId/coursework", async (c) => {
   ]);
   if (statements.length) await c.env.DB.batch(statements);
 
+  // v1.22.0 在 Classroom 刪掉的作業：清單裡已經沒有，就停掉背景預批，首頁「等你確認」也不再列
+  // （背景輪詢只在拉繳交回 404 時才會停，作業已經沒人交了可能一直拉不到 404）
+  const ids = courseWork.map((w) => w.id);
+  await c.env.DB.prepare(
+    `UPDATE autograde_watch SET watch_until = ? WHERE course_id = ? AND watch_until > ?
+       AND coursework_id NOT IN (SELECT value FROM json_each(?))`
+  )
+    .bind(now, courseId, now, JSON.stringify(ids))
+    .run();
+
   return c.json({ courseWork, canWrite });
 });
 

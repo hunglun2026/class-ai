@@ -88,7 +88,7 @@ export default function CourseWork() {
         <button className="secondary" onClick={() => navigate(`/courses/${courseId}/new`, { state: { courseName } })}>
           ＋ 在 classAI 出新作業
         </button>
-        <span className="muted hint-line">在這裡出的作業，批完可以一鍵把分數送回 Classroom</span>
+        <span className="muted hint-line">在這裡出的作業，批完可以一鍵發還給學生（分數＋評語）</span>
       </div>
 
       {error && (
@@ -137,7 +137,7 @@ export default function CourseWork() {
                 <strong>
                   {w.title}
                   {w.state === "DRAFT" && <span className="badge waiting inline-badge">Classroom 草稿，還沒發布</span>}
-                  {w.associatedWithDeveloper && <span className="badge confirmed inline-badge">分數可送回 Classroom</span>}
+                  {w.associatedWithDeveloper && <span className="badge confirmed inline-badge">可一鍵發還</span>}
                 </strong>
                 <span className="muted">
                   {due ? formatDue(due) : "沒有設定截止日"}

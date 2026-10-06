@@ -18,6 +18,7 @@ import { inboxRoutes } from "./routes/inbox";
 import { styleRoutes } from "./routes/style";
 import { phraseRoutes } from "./routes/phrases";
 import { rewriteRoutes } from "./routes/rewrite";
+import { getReturnedFeedback } from "./lib/writeback";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -42,6 +43,14 @@ app.use("*", async (c, next) => {
     return c.json({ error: "這個請求不是從 classAI 網站送出的，已經擋下來" }, 403);
   }
   return next();
+});
+
+// v1.22.0 學生評語頁（不用登入）：網址裡的隨機碼就是鑰匙，只回作業名稱、分數、評語
+app.get("/api/feedback/:token", async (c) => {
+  const row = await getReturnedFeedback(c.env, c.req.param("token"));
+  if (!row) return c.json({ error: "找不到這份評語，可能連結打錯了，或老師還沒發還" }, 404);
+  c.header("Cache-Control", "no-store");
+  return c.json({ title: row.title, maxPoints: row.max_points, score: row.score, feedback: row.feedback ?? "", returnedAt: row.returned_at });
 });
 
 app.route("/oauth", mcpAuthRoutes); // /oauth/authorize、/oauth/callback；/mcp 本身走下面 OAuthProvider 的 apiHandler

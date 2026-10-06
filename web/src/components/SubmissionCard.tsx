@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { setPending } from "../unsaved";
 import { PhraseBar, RewriteBar } from "./FeedbackTools";
@@ -51,6 +51,14 @@ export default function SubmissionCard({
   const savedFeedback = submission.final_feedback ?? submission.ai_feedback ?? "";
   const [scoreText, setScoreText] = useState(savedScoreText);
   const [feedback, setFeedback] = useState(savedFeedback);
+  // v1.22.0 評語框隨內容長高，不用在小框裡捲；上限 60% 螢幕高，再長才出捲軸
+  const feedbackRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = feedbackRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, Math.round(window.innerHeight * 0.6))}px`;
+  }, [feedback]);
   const [manual, setManual] = useState(false);
   const [triedSave, setTriedSave] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
@@ -231,13 +239,15 @@ export default function SubmissionCard({
   };
   const riskBadge =
     submission.status === "ai_suggested" && submission.risk_level ? RISK_BADGE[submission.risk_level] : null;
-  // v1.18.0：送回 Classroom 的狀態（只有 classAI 出的作業才顯示）
+  // v1.22.0：發還給學生的狀態（只有 classAI 出的作業才顯示）
   const push = canWriteBack ? pushState(submission) : "not_ready";
   const pushBadge =
     push === "pushed" ? (
-      <span className="badge pushed">已送 Classroom</span>
+      <span className="badge pushed">已發還</span>
     ) : push === "stale" ? (
-      <span className="badge push-stale" title="送出後你又改了分數">Classroom 上是 {submission.pushed_score} 分，要再送</span>
+      <span className="badge push-stale" title="發還後你又改了分數或評語">
+        學生看到的是 {submission.returned_score} 分的舊版，要再發還
+      </span>
     ) : null;
   const similarBadge = similar ? (
     <span className="badge similar" title="只是提醒，請自己看兩份原文判斷">
@@ -431,6 +441,7 @@ export default function SubmissionCard({
             給學生的評語
           </label>
           <textarea
+            ref={feedbackRef}
             id={`fb-${submission.id}`}
             rows={5}
             value={feedback}

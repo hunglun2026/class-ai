@@ -16,9 +16,11 @@ submissionRoutes.use("*", requireAuth);
 
 const SUBMISSIONS_SELECT = `
   SELECT s.*, g.ai_score, g.ai_feedback, g.final_score, g.final_feedback, g.status, g.ai_model, g.ai_raw_json, g.locked, g.confidence_flags, g.risk_level,
-    g.updated_at AS grade_updated_at, p.pushed_score, p.pushed_at
+    g.updated_at AS grade_updated_at, p.pushed_score, p.pushed_at,
+    r.returned_score, r.returned_feedback, r.returned_at, r.link_attached
   FROM submissions s LEFT JOIN grades g ON g.submission_id = s.id
   LEFT JOIN grade_pushes p ON p.submission_id = s.id
+  LEFT JOIN grade_returns r ON r.submission_id = s.id
   WHERE s.coursework_id = ? ORDER BY s.student_name`;
 
 // 只讀 D1 快取，不打 Classroom API——AI 評分完刷新畫面走這支，不要每評一個人就整班重拉一次
@@ -38,7 +40,7 @@ submissionRoutes.get("/:courseWorkId", async (c) => {
   return c.json({ submissions: rows.results, autoSyncedAt: watch?.last_synced_at ?? null, canWriteBack, canWrite });
 });
 
-// v1.18.0 把老師確認過的分數送回 Classroom（草稿分數，老師在 Classroom 按「發還」才算數）
+// v1.22.0 一鍵發還：老師確認過的分數寫成正式分數、附評語連結、發還給學生（路徑沿用 v1.18.0）
 submissionRoutes.post("/:courseWorkId/push-grades", async (c) => {
   const teacherId = c.get("teacherId");
   const courseWorkId = c.req.param("courseWorkId");

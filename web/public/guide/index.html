@@ -374,26 +374,26 @@
   </section>
 
   <section class="step" id="writeback">
-    <div class="step-head"><span class="step-num">NEW</span><h2>在 classAI 出作業，分數一鍵送回 Classroom</h2></div>
-    <p>Google 只讓「出作業的那個工具」把分數寫進 Classroom，所以想讓分數自動回到 Classroom，作業要從 classAI 出：</p>
+    <div class="step-head"><span class="step-num">NEW</span><h2>在 classAI 出作業，批完一鍵發還給學生</h2></div>
+    <p>Google 只讓「出作業的那個工具」寫分數、發還作業，所以想批完就直接發還、不用再開 Classroom，作業要從 classAI 出：</p>
     <ol>
       <li>選作業那頁按「＋ 在 classAI 出新作業」，填標題、說明、滿分、截止時間（選填）</li>
       <li>選「直接發布」或「先存成 Classroom 草稿」（想先到 Classroom 附上檔案再自己發布，就選草稿）</li>
       <li>第一次會請你到 Google 多允許「查看、建立及編輯課程作業」一項，允許完會回到原本的頁面</li>
       <li>建好直接設定評分標準；學生照常在 Classroom 繳交，classAI 在背景先批好</li>
-      <li>你確認完，按批改頁的「把已確認的 N 位分數送到 Classroom」</li>
+      <li>你確認完，到批改頁最下面按「把已確認的 N 位發還給學生」</li>
     </ol>
     <ul class="btn-list">
-      <li><b>草稿分數</b>：學生看不到，到 Classroom 看過後按「發還」才算數。classAI 不會幫你發還</li>
-      <li><b>只送確認過的</b>：只送你按過「完成批改」或鎖定的分數，AI 建議的分數不會直接送出</li>
-      <li><b>改了要再送</b>：送出後你又改分，卡片會標「Classroom 上是 X 分，要再送」，再按一次只送改過的</li>
+      <li><b>分數</b>：寫成 Classroom 的正式分數並發還，學生會收到通知、馬上看得到</li>
+      <li><b>評語</b>：學生的作業裡會多一個連結，點開就是你寫的評語（不用登入，只有拿到連結的人看得到）</li>
+      <li><b>只發還確認過的</b>：只發還你按過「完成批改」或鎖定的，AI 建議的分數不會直接到學生手上</li>
+      <li><b>改了要再發</b>：發還後你又改分數或評語，卡片會標「學生看到的是舊版，要再發還」，再按一次只發改過的</li>
     </ul>
-    <div class="callout">評語 Google 沒開放寫入，請用每位的「複製分數與評語」貼到 Classroom。在 Classroom 自己建的作業，照樣用「複製全班分數」或下載 Excel。</div>
+    <div class="callout">如果 Google 不讓 classAI 把評語連結放進學生作業，畫面會提醒你，分數照樣發還，評語改用每位的「複製分數與評語」貼到 Classroom 私人留言。在 Classroom 自己建的作業，照樣用「複製全班分數」或下載 Excel。</div>
   </section>
 
   <section class="step" id="walkthrough">
-    <div class="step-head"><span class="step-num">NEW</span><h2>實際走一遍：從出作業到在 Classroom 看到草稿分數</h2></div>
-    <p>2026-09-29 用真的老師和學生帳號從頭到尾走過一次，照著做就能重現：</p>
+    <div class="step-head"><span class="step-num">NEW</span><h2>實際走一遍：從出作業到學生看到分數和評語</h2></div>
     <ol>
       <li>選好課程，按「＋ 在 classAI 出新作業」。第一次會看到「要多允許一項 Google 權限」的說明，按「前往 Google 允許」，在 Google 頁面同意後會自動回來</li>
       <li>填標題（例如「第三課閱讀心得」）、說明、滿分，選「直接發布」，按「建立作業，下一步設定評分標準」</li>
@@ -401,9 +401,8 @@
       <li>學生到 Classroom 繳交。Google 文件、圖片、PDF 都可以</li>
       <li>回 classAI 批改頁，按「更新學生繳交」。classAI 先批好的會出現在「等你確認」</li>
       <li>看 AI 的分數和評語，要改就直接改，然後按「完成批改」。AI 給滿分時卡片會提醒「建議確認是不是誤判」，這不是出錯，是請你多看一眼</li>
-      <li>按「把已確認的 N 位分數送到 Classroom」，出現「已送 N 位」，卡片上會標「已送 Classroom」</li>
-      <li>到 Classroom 這份作業的「學生的作業」頁，學生旁邊會看到分數加上「草稿」字樣（例如「10，滿分為 10」）。確認沒問題再按「發還」，學生才看得到</li>
-      <li>評語要每位按「複製分數與評語」，貼到 Classroom 的私人留言。Google 不開放外部工具寫評語</li>
+      <li>捲到最下面按「把已確認的 N 位發還給學生」，確認後出現「已發還 N 位」，卡片上會標「已發還」</li>
+      <li>學生在 Classroom 看到分數，作業裡多一個連結，點開就是評語</li>
     </ol>
     <div class="callout">想刪掉不要的作業：在 Classroom 那份作業頁右上角三個點，選「刪除」。classAI 不會幫你刪 Classroom 上的東西。</div>
   </section>
@@ -430,7 +429,7 @@
 
   <section class="step" id="record">
     <div class="step-head"><span class="step-num">END</span><h2>把成績登記進 Classroom</h2></div>
-    <div class="callout">classAI <strong>不會自動寫回 Classroom</strong>。在 classAI 出的作業可以按按鈕送回草稿分數（見上一段）；其他作業兩種登記方式都可以：</div>
+    <div class="callout">在 classAI 出的作業可以一鍵發還（見上面）；在 Classroom 建的作業，Google 不開放外部工具寫分數，兩種登記方式都可以：</div>
     <ol>
       <li>每位學生按「複製分數與評語」，貼到 Classroom</li>
       <li>按「下載成績表（Excel）」，得到姓名、分數、評語、狀態四欄的 .xlsx，邊看邊登記，也可以存檔備份</li>

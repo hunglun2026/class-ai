@@ -30,6 +30,8 @@ export async function onRequest(context) {
   // 這些路徑本來就要 Google 登入才拿得到資料（只有 /health 與 /api/auth/* 是公開的）
   const path = new URL(request.url).pathname;
   if (path === "/mcp" || path.startsWith("/api/") || path.startsWith("/mcp/") || path.startsWith("/oauth/")) return next();
+  // v1.22.0 學生看評語的頁面（functions/f/[token].js）：學生沒有內測密碼，網址裡的隨機碼就是鑰匙
+  if (path.startsWith("/f/")) return next();
 
   const cookies = request.headers.get("Cookie") || "";
   const authed = cookies.split(";").some((c) => {

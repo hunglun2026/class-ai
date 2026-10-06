@@ -266,3 +266,44 @@ export async function patchDraftGrade(
     { draftGrade }
   );
 }
+
+/**
+ * v1.22.0 發還：一次寫草稿分數＋正式分數（assignedGrade 學生看得到）。
+ * 只寫 assignedGrade 也行，但 Classroom 成績頁的草稿欄會留舊值讓老師困惑，所以兩個一起寫成同一個分數。
+ */
+export async function patchGrades(
+  accessToken: string,
+  courseId: string,
+  courseWorkId: string,
+  submissionId: string,
+  grade: number
+): Promise<void> {
+  await sendClassroom(
+    accessToken,
+    "PATCH",
+    `/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}?updateMask=draftGrade,assignedGrade`,
+    { draftGrade: grade, assignedGrade: grade }
+  );
+}
+
+// 發還給學生：學生收到通知、看得到 assignedGrade。發還不會自己把草稿分數變正式，所以要先 patchGrades
+export async function returnSubmission(accessToken: string, courseId: string, courseWorkId: string, submissionId: string): Promise<void> {
+  await sendClassroom(accessToken, "POST", `/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}:return`, {});
+}
+
+// 在學生的繳交上加一個連結（評語頁）。Google 只讓建立作業的 API 專案加，而且只限「作業」類型；
+// 老師在學生交件後能不能加，官方文件沒講清楚，呼叫端要能接受失敗
+export async function addLinkAttachment(
+  accessToken: string,
+  courseId: string,
+  courseWorkId: string,
+  submissionId: string,
+  url: string
+): Promise<void> {
+  await sendClassroom(
+    accessToken,
+    "POST",
+    `/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions/${submissionId}:modifyAttachments`,
+    { addAttachments: [{ link: { url } }] }
+  );
+}

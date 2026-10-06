@@ -22,6 +22,11 @@ export interface Submission {
   autograde_error: string | null; // 背景自動預批時 AI 評不了的原因（v1.17.0），老師要自己批
   pushed_score: number | null; // 已送到 Classroom 的草稿分數（v1.18.0）
   pushed_at: number | null;
+  // v1.22.0 發還給學生時的分數與評語；之後老師又改了要再發還
+  returned_score: number | null;
+  returned_feedback: string | null;
+  returned_at: number | null;
+  link_attached: number | null;
 }
 
 // AI 評不了、要老師自己批的（老師已經打過分就不算）

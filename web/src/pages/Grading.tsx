@@ -388,7 +388,7 @@ export default function Grading() {
 
       <p className="trust-note">
         {writeback.canWriteBack
-          ? "AI 給的分數和評語只是草稿，要看過、按「完成批改」才算數；只有你確認過的分數才能送回 Classroom。"
+          ? "AI 給的分數和評語只是草稿，要看過、按「完成批改」才算數；只有你確認過的才能發還給學生。"
           : "AI 給的分數和評語只是草稿，不會寫回 Google Classroom；要看過、按「完成批改」才算數。"}
       </p>
 
@@ -470,15 +470,6 @@ export default function Grading() {
         )}
       </div>
 
-      {courseWorkId && list.length > 0 && (
-        <WritebackPanel
-          rows={list}
-          canWriteBack={writeback.canWriteBack}
-          canWrite={writeback.canWrite}
-          courseWorkId={courseWorkId}
-          onPushed={refreshSubmissions}
-        />
-      )}
       {courseWorkId && <InsightsPanel courseWorkId={courseWorkId} refreshKey={insightsKey} />}
 
       {counts.resubmitted > 0 && filter !== "resubmitted" && (
@@ -497,7 +488,7 @@ export default function Grading() {
             <strong>全班都批改完了！</strong>
             <p>
               {writeback.canWriteBack
-                ? "按上面「送到 Classroom」把分數送回去，評語用每張卡片的「複製分數與評語」貼到 Classroom。"
+                ? "到頁面最下面按「發還給學生」，分數和評語會一起送到學生手上。"
                 : "按每張卡片的「複製分數與評語」貼回 Classroom，或下載 Excel 成績表對照登記。"}
             </p>
           </div>
@@ -563,6 +554,17 @@ export default function Grading() {
           onConfirmed={() => goNextUnfinished(s.id)}
         />
       ))}
+
+      {/* v1.22.0 發還面板移到學生清單下面：批改時學生卡片不要被擠到很下面，批完往下捲就看到 */}
+      {courseWorkId && list.length > 0 && (
+        <WritebackPanel
+          rows={list}
+          canWriteBack={writeback.canWriteBack}
+          canWrite={writeback.canWrite}
+          courseWorkId={courseWorkId}
+          onPushed={refreshSubmissions}
+        />
+      )}
     </div>
   );
 }

@@ -44,6 +44,10 @@ let tokenResponse: any = {};
 const created: any[] = [];
 const patches: { url: string; body: any }[] = [];
 const listUrls: string[] = [];
+const links: { subId: string; url: string }[] = [];
+const returns: string[] = [];
+let linkStatus = 200;
+let returnStatus: Record<string, number> = {};
 let geminiReply: any = null;
 let geminiStatus = 200;
 const geminiCalls: any[] = [];
@@ -64,6 +68,17 @@ globalThis.fetch = (async (input: any, init?: any) => {
       patches.push({ url, body: JSON.parse(init.body) });
       const st = patchStatus[subId] ?? 200;
       return st === 200 ? Response.json({ id: subId }) : new Response("err", { status: st });
+    }
+    if (method === "POST" && url.includes(":modifyAttachments")) {
+      const subId = url.split("/studentSubmissions/")[1].split(":")[0];
+      links.push({ subId, url: JSON.parse(init.body).addAttachments[0].link.url });
+      return linkStatus === 200 ? Response.json({ id: subId }) : new Response("denied", { status: linkStatus });
+    }
+    if (method === "POST" && url.includes(":return")) {
+      const subId = url.split("/studentSubmissions/")[1].split(":")[0];
+      returns.push(subId);
+      const st = returnStatus[subId] ?? 200;
+      return st === 200 ? Response.json({}) : new Response("err", { status: st });
     }
     if (url.includes("/courseWork?")) {
       listUrls.push(url);
@@ -211,6 +226,18 @@ console.log("\n== 十三、作業清單：誰能寫回 ==");
   ).all();
   const m = Object.fromEntries(flags.results.map((x: any) => [x.id, x.v]));
   check("13-3 依 associatedWithDeveloper 記可否寫回", m["wbw-mine"] === 1 && m["wbw-cr"] === 0, JSON.stringify(m));
+
+  // 在 Classroom 刪掉的作業：重新拉清單時停掉背景預批（首頁不再列）；還在的不動
+  await env.DB.prepare("INSERT INTO coursework VALUES ('wbw-gone','wbc1','被刪的作業',NULL,10,?)").bind(now).run();
+  await env.DB.batch(
+    ["wbw-gone", "wbw-mine"].map((id) =>
+      env.DB.prepare("INSERT INTO autograde_watch (coursework_id, course_id, teacher_id, watch_until) VALUES (?, 'wbc1', 'wbt1', ?)").bind(id, now + 86400)
+    )
+  );
+  await call("GET", "/api/courses/wbc1/coursework");
+  const w: any = await env.DB.prepare("SELECT coursework_id id, watch_until u FROM autograde_watch WHERE course_id = 'wbc1'").all();
+  const wm = Object.fromEntries(w.results.map((x: any) => [x.id, x.u]));
+  check("13-4 Classroom 已刪的作業停止預批、還在的照舊", wm["wbw-gone"] <= Math.floor(Date.now() / 1000) && wm["wbw-mine"] > now + 3600, JSON.stringify(wm));
 }
 
 console.log("\n== 十四、分數送回 Classroom ==");
@@ -248,7 +275,16 @@ const addSub = async (cwId: string, id: string, name: string, g?: { ai: number |
     r.status === 200 && r.json?.pushed === 3 && sent["wb-a"] === 8 && sent["wb-c"] === 5 && sent["wb-d"] === 9 && !("wb-b" in sent) && r.json?.notConfirmed === 2,
     `${r.text} ${JSON.stringify(sent)}`
   );
-  check("14-4 寫的是 draftGrade（草稿分數），不是 assignedGrade", patches.every((p) => p.url.includes("updateMask=draftGrade") && !("assignedGrade" in p.body)), patches.map((p) => p.url).join(" "));
+  check("14-4 草稿分數＋正式分數一起寫成同一個分數", patches.every((p) => p.url.includes("updateMask=draftGrade,assignedGrade") && p.body.assignedGrade === p.body.draftGrade), patches.map((p) => p.url).join(" "));
+  check("14-4b 每位都加評語連結（/f/隨機碼）並發還", links.length === 3 && links.every((l) => /\/f\/[A-Za-z0-9_-]{22}$/.test(l.url)) && returns.length === 3 && r.json?.linkBlocked === false, JSON.stringify({ links, returns }));
+  const tok = links.find((l) => l.subId === "wb-a")!.url.split("/f/")[1];
+  let fb = await call("GET", `/api/feedback/${tok}`, undefined, "none");
+  check("14-4c 評語頁不用登入：只回作業名、分數、評語，沒有姓名", fb.status === 200 && fb.json?.score === 8 && fb.json?.feedback === "老師評語" && !fb.text.includes("王小明"), fb.text);
+  fb = await call("GET", "/api/feedback/AAAAAAAAAAAAAAAAAAAAAA", undefined, "none");
+  const fb2 = await call("GET", "/api/feedback/../../x", undefined, "none");
+  check("14-4d 亂猜的隨機碼、怪字元：404", fb.status === 404 && fb2.status === 404, fb.text);
+  links.length = 0;
+  returns.length = 0;
 
   patches.length = 0;
   r = await call("POST", "/api/submissions/wbw-mine/push-grades");
@@ -260,7 +296,17 @@ const addSub = async (cwId: string, id: string, name: string, g?: { ai: number |
   check("14-6 送出後老師又改分：清單看得出 Classroom 上還是舊分數（pushed 8、現在 9）", a?.pushed_score === 8 && a?.final_score === 9 && list.json?.canWriteBack === true && list.json?.canWrite === true, JSON.stringify(a));
   patches.length = 0;
   r = await call("POST", "/api/submissions/wbw-mine/push-grades");
-  check("14-7 再送：只送改過的王小明 9 分", r.json?.pushed === 1 && patches.length === 1 && patches[0].body.draftGrade === 9, JSON.stringify(patches));
+  check("14-7 再送：只送改過的王小明 9 分，連結已經有了不重加、照樣發還", r.json?.pushed === 1 && patches.length === 1 && patches[0].body.assignedGrade === 9 && links.length === 0 && returns.length === 1, JSON.stringify(patches));
+  fb = await call("GET", `/api/feedback/${tok}`, undefined, "none");
+  check("14-7b 同一個連結看到的是新分數與新評語", fb.json?.score === 9 && fb.json?.feedback === "改成 9 分", fb.text);
+
+  await env.DB.prepare("UPDATE grades SET final_feedback = '只改評語' WHERE submission_id = 'wb-a'").run();
+  patches.length = 0;
+  returnStatus = { "wb-a": 400 }; // 已發還過、學生沒重交：Google 可能不讓再發還一次
+  r = await call("POST", "/api/submissions/wbw-mine/push-grades");
+  fb = await call("GET", `/api/feedback/${tok}`, undefined, "none");
+  check("14-7c 只改評語也算要重發；已發還過再發還被拒（400）當成功", r.json?.pushed === 1 && r.json?.failed?.length === 0 && fb.json?.feedback === "只改評語", r.text);
+  returnStatus = {};
 
   await env.DB.prepare("UPDATE grades SET final_score = 10, status = 'confirmed' WHERE submission_id IN ('wb-c','wb-d')").run();
   patchStatus = { "wb-c": 404 };
@@ -294,7 +340,16 @@ const addSub = async (cwId: string, id: string, name: string, g?: { ai: number |
   patches.length = 0;
   const r1 = await call("POST", "/api/submissions/wbw-big/push-grades");
   const r2 = await call("POST", "/api/submissions/wbw-big/push-grades");
-  check("14-11 45 位：第一次送 40、剩 5；第二次送完 5、剩 0", r1.json?.pushed === 40 && r1.json?.remaining === 5 && r2.json?.pushed === 5 && r2.json?.remaining === 0, `${r1.text} ${r2.text}`);
+  check("14-11 45 位：一次發還 15、剩 30；第二次再 15、剩 15", r1.json?.pushed === 15 && r1.json?.remaining === 30 && r2.json?.pushed === 15 && r2.json?.remaining === 15, `${r1.text} ${r2.text}`);
+
+  // Google 不讓老師在繳交上加連結：分數照樣發還，告訴前端評語要自己貼；擋過一次就不再試
+  linkStatus = 403;
+  links.length = 0;
+  returns.length = 0;
+  const r3 = await call("POST", "/api/submissions/wbw-big/push-grades");
+  const noLink: any = await env.DB.prepare("SELECT COUNT(*) n FROM grade_returns r JOIN submissions s ON s.id = r.submission_id WHERE s.coursework_id = 'wbw-big' AND r.link_attached = 0").first();
+  check("14-12 加連結被擋：15 位照樣發還、linkBlocked、只試一次", r3.json?.pushed === 15 && r3.json?.linkBlocked === true && links.length === 1 && returns.length === 15 && noLink?.n === 15, `${r3.text} links=${links.length}`);
+  linkStatus = 200;
 }
 
 console.log("\n== 十五、全班學習診斷 ==");

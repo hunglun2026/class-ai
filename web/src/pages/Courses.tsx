@@ -154,7 +154,7 @@ export default function Courses() {
             <li>告訴 AI 怎麼評分（有作文、學習單等範本，按一下就帶入）</li>
             <li>AI 先幫全班評一輪，你看過、修改，再按「完成批改」</li>
           </ol>
-          <p className="intro-note">分數不會自動送回 Classroom，改好後用「複製」或下載 Excel 自己登記。</p>
+          <p className="intro-note">在 classAI 出的作業，批完可以一鍵發還給學生（分數＋評語）；在 Classroom 建的作業，用「複製」或下載 Excel 自己登記。</p>
         </div>
       )}
 
